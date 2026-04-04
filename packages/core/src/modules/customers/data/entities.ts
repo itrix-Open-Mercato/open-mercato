@@ -790,6 +790,264 @@ export class CustomerPipelineStage {
   updatedAt: Date = new Date()
 }
 
+// --- Lead Funnel Entities ---
+
+export type CustomerLeadOutcome = 'open' | 'won' | 'lost'
+export type CustomerLeadPipelineStageKind = 'open' | 'won' | 'lost'
+
+@Entity({ tableName: 'customer_lead_pipelines' })
+@Index({ name: 'customer_lead_pipelines_org_tenant_idx', properties: ['organizationId', 'tenantId'] })
+export class CustomerLeadPipeline {
+  [OptionalProps]?: 'isDefault' | 'isActive' | 'createdAt' | 'updatedAt'
+
+  @PrimaryKey({ type: 'uuid', defaultRaw: 'gen_random_uuid()' })
+  id!: string
+
+  @Property({ name: 'organization_id', type: 'uuid' })
+  organizationId!: string
+
+  @Property({ name: 'tenant_id', type: 'uuid' })
+  tenantId!: string
+
+  @Property({ type: 'text' })
+  name!: string
+
+  @Property({ type: 'text' })
+  code!: string
+
+  @Property({ name: 'is_default', type: 'boolean', default: false })
+  isDefault: boolean = false
+
+  @Property({ name: 'is_active', type: 'boolean', default: true })
+  isActive: boolean = true
+
+  @Property({ name: 'created_at', type: Date, onCreate: () => new Date() })
+  createdAt: Date = new Date()
+
+  @Property({ name: 'updated_at', type: Date, onUpdate: () => new Date() })
+  updatedAt: Date = new Date()
+}
+
+@Entity({ tableName: 'customer_lead_pipeline_stages' })
+@Index({ name: 'customer_lead_pipeline_stages_pipeline_idx', properties: ['pipelineId', 'position'] })
+@Index({ name: 'customer_lead_pipeline_stages_org_tenant_idx', properties: ['organizationId', 'tenantId'] })
+export class CustomerLeadPipelineStage {
+  [OptionalProps]?: 'isActive' | 'createdAt' | 'updatedAt'
+
+  @PrimaryKey({ type: 'uuid', defaultRaw: 'gen_random_uuid()' })
+  id!: string
+
+  @Property({ name: 'organization_id', type: 'uuid' })
+  organizationId!: string
+
+  @Property({ name: 'tenant_id', type: 'uuid' })
+  tenantId!: string
+
+  @Property({ name: 'pipeline_id', type: 'uuid' })
+  pipelineId!: string
+
+  @Property({ type: 'text' })
+  name!: string
+
+  @Property({ type: 'text' })
+  code!: string
+
+  @Property({ name: 'position', type: 'int' })
+  position!: number
+
+  @Property({ name: 'kind', type: 'text' })
+  kind!: CustomerLeadPipelineStageKind
+
+  @Property({ name: 'is_active', type: 'boolean', default: true })
+  isActive: boolean = true
+
+  @Property({ name: 'created_at', type: Date, onCreate: () => new Date() })
+  createdAt: Date = new Date()
+
+  @Property({ name: 'updated_at', type: Date, onUpdate: () => new Date() })
+  updatedAt: Date = new Date()
+}
+
+@Entity({ tableName: 'customer_lead_lost_reasons' })
+@Index({ name: 'customer_lead_lost_reasons_org_tenant_idx', properties: ['organizationId', 'tenantId'] })
+export class CustomerLeadLostReason {
+  [OptionalProps]?: 'isActive' | 'createdAt' | 'updatedAt'
+
+  @PrimaryKey({ type: 'uuid', defaultRaw: 'gen_random_uuid()' })
+  id!: string
+
+  @Property({ name: 'organization_id', type: 'uuid' })
+  organizationId!: string
+
+  @Property({ name: 'tenant_id', type: 'uuid' })
+  tenantId!: string
+
+  @Property({ name: 'pipeline_id', type: 'uuid', nullable: true })
+  pipelineId?: string | null
+
+  @Property({ type: 'text' })
+  name!: string
+
+  @Property({ type: 'text' })
+  code!: string
+
+  @Property({ name: 'is_active', type: 'boolean', default: true })
+  isActive: boolean = true
+
+  @Property({ name: 'sort_order', type: 'int', default: 0 })
+  sortOrder: number = 0
+
+  @Property({ name: 'created_at', type: Date, onCreate: () => new Date() })
+  createdAt: Date = new Date()
+
+  @Property({ name: 'updated_at', type: Date, onUpdate: () => new Date() })
+  updatedAt: Date = new Date()
+}
+
+@Entity({ tableName: 'customer_leads' })
+@Index({ name: 'customer_leads_pipeline_stage_idx', properties: ['organizationId', 'tenantId', 'pipelineId', 'stageId', 'createdAt'] })
+@Index({ name: 'customer_leads_outcome_idx', properties: ['organizationId', 'tenantId', 'outcome', 'createdAt'] })
+@Index({ name: 'customer_leads_email_idx', properties: ['organizationId', 'tenantId', 'primaryEmail'] })
+@Index({ name: 'customer_leads_phone_idx', properties: ['organizationId', 'tenantId', 'primaryPhone'] })
+@Index({ name: 'customer_leads_vat_idx', properties: ['organizationId', 'tenantId', 'vatId'] })
+@Index({ name: 'customer_leads_source_idx', properties: ['organizationId', 'tenantId', 'source', 'sourceChannel'] })
+export class CustomerLead {
+  [OptionalProps]?: 'outcome' | 'createdAt' | 'updatedAt' | 'deletedAt'
+
+  @PrimaryKey({ type: 'uuid', defaultRaw: 'gen_random_uuid()' })
+  id!: string
+
+  @Property({ name: 'organization_id', type: 'uuid' })
+  organizationId!: string
+
+  @Property({ name: 'tenant_id', type: 'uuid' })
+  tenantId!: string
+
+  @Property({ name: 'pipeline_id', type: 'uuid' })
+  pipelineId!: string
+
+  @Property({ name: 'stage_id', type: 'uuid' })
+  stageId!: string
+
+  @Property({ name: 'outcome', type: 'text', default: 'open' })
+  outcome: CustomerLeadOutcome = 'open'
+
+  @Property({ name: 'lost_reason_id', type: 'uuid', nullable: true })
+  lostReasonId?: string | null
+
+  @Property({ name: 'display_name', type: 'text' })
+  displayName!: string
+
+  @Property({ name: 'owner_user_id', type: 'uuid', nullable: true })
+  ownerUserId?: string | null
+
+  @Property({ name: 'source', type: 'text', nullable: true })
+  source?: string | null
+
+  @Property({ name: 'source_channel', type: 'text', nullable: true })
+  sourceChannel?: string | null
+
+  @Property({ name: 'source_external_id', type: 'text', nullable: true })
+  sourceExternalId?: string | null
+
+  @Property({ name: 'source_payload_raw', type: 'jsonb', nullable: true })
+  sourcePayloadRaw?: Record<string, unknown> | null
+
+  @Property({ name: 'source_received_at', type: Date, nullable: true })
+  sourceReceivedAt?: Date | null
+
+  @Property({ name: 'primary_email', type: 'text', nullable: true })
+  primaryEmail?: string | null
+
+  @Property({ name: 'primary_phone', type: 'text', nullable: true })
+  primaryPhone?: string | null
+
+  @Property({ name: 'vat_id', type: 'text', nullable: true })
+  vatId?: string | null
+
+  @Property({ name: 'spam_score', type: 'numeric', precision: 5, scale: 2, nullable: true })
+  spamScore?: string | null
+
+  @Property({ name: 'qualification_notes', type: 'text', nullable: true })
+  qualificationNotes?: string | null
+
+  @Property({ name: 'person_data', type: 'jsonb', nullable: true })
+  personData?: Record<string, unknown> | null
+
+  @Property({ name: 'company_data', type: 'jsonb', nullable: true })
+  companyData?: Record<string, unknown> | null
+
+  @Property({ name: 'deal_data', type: 'jsonb', nullable: true })
+  dealData?: Record<string, unknown> | null
+
+  @Property({ name: 'created_person_id', type: 'uuid', nullable: true })
+  createdPersonId?: string | null
+
+  @Property({ name: 'created_company_id', type: 'uuid', nullable: true })
+  createdCompanyId?: string | null
+
+  @Property({ name: 'created_deal_id', type: 'uuid', nullable: true })
+  createdDealId?: string | null
+
+  @Property({ name: 'linked_person_id', type: 'uuid', nullable: true })
+  linkedPersonId?: string | null
+
+  @Property({ name: 'linked_company_id', type: 'uuid', nullable: true })
+  linkedCompanyId?: string | null
+
+  @Property({ name: 'linked_deal_id', type: 'uuid', nullable: true })
+  linkedDealId?: string | null
+
+  @Property({ name: 'converted_at', type: Date, nullable: true })
+  convertedAt?: Date | null
+
+  @Property({ name: 'converted_by_user_id', type: 'uuid', nullable: true })
+  convertedByUserId?: string | null
+
+  @Property({ name: 'created_at', type: Date, onCreate: () => new Date() })
+  createdAt: Date = new Date()
+
+  @Property({ name: 'updated_at', type: Date, onUpdate: () => new Date() })
+  updatedAt: Date = new Date()
+
+  @Property({ name: 'deleted_at', type: Date, nullable: true })
+  deletedAt?: Date | null
+}
+
+@Entity({ tableName: 'customer_lead_history' })
+@Index({ name: 'customer_lead_history_lead_idx', properties: ['leadId', 'createdAt'] })
+@Index({ name: 'customer_lead_history_org_tenant_idx', properties: ['organizationId', 'tenantId'] })
+export class CustomerLeadHistory {
+  [OptionalProps]?: 'createdAt'
+
+  @PrimaryKey({ type: 'uuid', defaultRaw: 'gen_random_uuid()' })
+  id!: string
+
+  @Property({ name: 'organization_id', type: 'uuid' })
+  organizationId!: string
+
+  @Property({ name: 'tenant_id', type: 'uuid' })
+  tenantId!: string
+
+  @Property({ name: 'lead_id', type: 'uuid' })
+  leadId!: string
+
+  @Property({ name: 'event_type', type: 'text' })
+  eventType!: string
+
+  @Property({ name: 'actor_user_id', type: 'uuid', nullable: true })
+  actorUserId?: string | null
+
+  @Property({ name: 'snapshot_before', type: 'jsonb', nullable: true })
+  snapshotBefore?: Record<string, unknown> | null
+
+  @Property({ name: 'snapshot_after', type: 'jsonb', nullable: true })
+  snapshotAfter?: Record<string, unknown> | null
+
+  @Property({ name: 'created_at', type: Date, onCreate: () => new Date() })
+  createdAt: Date = new Date()
+}
+
 @Entity({ tableName: 'customer_todo_links' })
 @Index({ name: 'customer_todo_links_entity_idx', properties: ['entity'] })
 @Index({ name: 'customer_todo_links_entity_created_idx', properties: ['entity', 'createdAt'] })
