@@ -27,6 +27,9 @@ import {
   CustomerTodoLink,
   CustomerPipeline,
   CustomerPipelineStage,
+  CustomerLeadPipeline,
+  CustomerLeadPipelineStage,
+  CustomerLeadLostReason,
 } from './data/entities'
 import { ensureDictionaryEntry } from './commands/shared'
 import { recomputeNextInteraction } from './lib/interactionProjection'
@@ -2827,7 +2830,68 @@ async function seedDefaultPipeline(em: EntityManager, { tenantId, organizationId
   await em.flush()
 }
 
-export { seedCustomerDictionaries, seedCustomerExamples, seedCustomerStressTest, seedCurrencyDictionary, seedDefaultPipeline }
+async function seedDefaultLeadPipeline(em: EntityManager, { tenantId, organizationId }: SeedArgs): Promise<void> {
+  const existing = await em.findOne(CustomerLeadPipeline, { tenantId, organizationId, isDefault: true })
+  if (existing) return
+
+  const pipeline = em.create(CustomerLeadPipeline, {
+    tenantId,
+    organizationId,
+    name: 'Default',
+    code: 'default',
+    isDefault: true,
+    isActive: true,
+  })
+  em.persist(pipeline)
+  await em.flush()
+
+  const stages: Array<{ name: string; code: string; kind: 'open' | 'won' | 'lost'; position: number }> = [
+    { name: 'New', code: 'new', kind: 'open', position: 0 },
+    { name: 'Qualifying', code: 'qualifying', kind: 'open', position: 1 },
+    { name: 'Won', code: 'won', kind: 'won', position: 2 },
+    { name: 'Lost', code: 'lost', kind: 'lost', position: 3 },
+  ]
+
+  for (const stage of stages) {
+    em.persist(em.create(CustomerLeadPipelineStage, {
+      tenantId,
+      organizationId,
+      pipelineId: pipeline.id,
+      name: stage.name,
+      code: stage.code,
+      kind: stage.kind,
+      position: stage.position,
+      isActive: true,
+    }))
+  }
+  await em.flush()
+}
+
+async function seedDefaultLeadLostReasons(em: EntityManager, { tenantId, organizationId }: SeedArgs): Promise<void> {
+  const existing = await em.findOne(CustomerLeadLostReason, { tenantId, organizationId })
+  if (existing) return
+
+  const reasons: Array<{ name: string; code: string; sortOrder: number }> = [
+    { name: 'Not interested', code: 'not-interested', sortOrder: 0 },
+    { name: 'Budget', code: 'budget', sortOrder: 1 },
+    { name: 'Competitor', code: 'competitor', sortOrder: 2 },
+    { name: 'Spam', code: 'spam', sortOrder: 3 },
+  ]
+
+  for (const reason of reasons) {
+    em.persist(em.create(CustomerLeadLostReason, {
+      tenantId,
+      organizationId,
+      name: reason.name,
+      code: reason.code,
+      isActive: true,
+      sortOrder: reason.sortOrder,
+    }))
+  }
+  await em.flush()
+}
+
+export { seedCustomerDictionaries, seedCustomerExamples, seedCustomerStressTest, seedCurrencyDictionary, seedDefaultPipeline, seedDefaultLeadPipeline, seedDefaultLeadLostReasons }
 export type { SeedArgs as CustomerSeedArgs }
 
 // ---------------------------------------------------------------------------

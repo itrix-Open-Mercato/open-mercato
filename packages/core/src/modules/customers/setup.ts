@@ -7,6 +7,8 @@ import {
   seedCurrencyDictionary,
   seedCustomerExamples,
   seedDefaultPipeline,
+  seedDefaultLeadPipeline,
+  seedDefaultLeadLostReasons,
 } from './cli'
 
 const interactionFeatureToggles = [
@@ -59,6 +61,8 @@ export const setup: ModuleSetupConfig = {
     await seedCustomerDictionaries(ctx.em, scope)
     await seedCurrencyDictionary(ctx.em, scope)
     await seedDefaultPipeline(ctx.em, scope)
+    await seedDefaultLeadPipeline(ctx.em, scope)
+    await seedDefaultLeadLostReasons(ctx.em, scope)
     await ensureCustomerCustomFieldDefinitions(ctx.em, ctx.tenantId)
     await seedInteractionFeatureToggles(ctx.em)
   },
@@ -83,6 +87,9 @@ export const setup: ModuleSetupConfig = {
       'customers.activities.manage',
       'customers.pipelines.view',
       'customers.interactions.view',
+      'customers.leads.view',
+      'customers.leads.manage',
+      'customers.lead-pipelines.view',
       'customers.widgets.todos',
       'customers.widgets.next-interactions',
       'customers.widgets.new-customers',

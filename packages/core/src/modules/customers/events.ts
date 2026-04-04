@@ -56,6 +56,21 @@ const events = [
   { id: 'customers.interaction.reverted', label: 'Interaction Reverted', entity: 'interaction', category: 'lifecycle' },
   { id: 'customers.interaction.deleted', label: 'Interaction Deleted', entity: 'interaction', category: 'crud' },
   { id: 'customers.next_interaction.updated', label: 'Next Interaction Updated', entity: 'interaction', category: 'lifecycle' },
+
+  // Leads
+  { id: 'customers.lead.created', label: 'Lead Created', entity: 'lead', category: 'crud' },
+  { id: 'customers.lead.updated', label: 'Lead Updated', entity: 'lead', category: 'crud' },
+  { id: 'customers.lead.deleted', label: 'Lead Deleted', entity: 'lead', category: 'crud' },
+  { id: 'customers.lead.assigned', label: 'Lead Assigned', entity: 'lead', category: 'lifecycle' },
+  { id: 'customers.lead.stage_changed', label: 'Lead Stage Changed', entity: 'lead', category: 'lifecycle' },
+  { id: 'customers.lead.lost', label: 'Lead Lost', entity: 'lead', category: 'lifecycle' },
+  { id: 'customers.lead.person_linked', label: 'Lead Person Linked', entity: 'lead', category: 'lifecycle' },
+  { id: 'customers.lead.company_linked', label: 'Lead Company Linked', entity: 'lead', category: 'lifecycle' },
+  { id: 'customers.lead.deal_linked', label: 'Lead Deal Linked', entity: 'lead', category: 'lifecycle' },
+  { id: 'customers.lead.person_created', label: 'Lead Person Created', entity: 'lead', category: 'lifecycle' },
+  { id: 'customers.lead.company_created', label: 'Lead Company Created', entity: 'lead', category: 'lifecycle' },
+  { id: 'customers.lead.deal_created', label: 'Lead Deal Created', entity: 'lead', category: 'lifecycle' },
+  { id: 'customers.lead.converted', label: 'Lead Converted', entity: 'lead', category: 'lifecycle' },
 ] as const
 
 export const eventsConfig = createModuleEvents({
