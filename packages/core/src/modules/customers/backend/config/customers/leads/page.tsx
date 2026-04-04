@@ -12,14 +12,6 @@ type PipelineRow = { id: string; name: string; code: string; isDefault: boolean;
 type StageRow = { id: string; pipelineId: string; name: string; code: string; position: number; kind: string; isActive: boolean }
 type LostReasonRow = { id: string; name: string; code: string; isActive: boolean; sortOrder: number }
 
-export const metadata = {
-  requireAuth: true,
-  requireFeatures: ['customers.lead-pipelines.view'],
-  pageTitle: 'Lead Pipelines',
-  pageTitleKey: 'customers.nav.leadPipelines',
-  breadcrumb: [{ label: 'Lead Pipelines', labelKey: 'customers.nav.leadPipelines' }],
-}
-
 export default function LeadPipelinesConfigPage() {
   const t = useT()
   const orgVersion = useOrganizationScopeVersion()
