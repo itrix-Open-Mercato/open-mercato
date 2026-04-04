@@ -81,6 +81,8 @@ export const CUSTOMER_ACTIVITY_CUSTOM_FIELDS = [
   }),
 ]
 
+export const CUSTOMER_LEAD_CUSTOM_FIELDS: ReturnType<typeof cf.text>[] = []
+
 export const CUSTOMER_CUSTOM_FIELD_SETS: CustomFieldSet[] = [
   {
     entity: CoreEntities.customers.customer_person_profile,

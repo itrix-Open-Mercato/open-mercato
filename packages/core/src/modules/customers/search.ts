@@ -1081,6 +1081,74 @@ export const searchConfig: SearchModuleConfig = {
         excluded: [],
       },
     },
+
+    // =========================================================================
+    // Customer Lead
+    // =========================================================================
+    {
+      entityId: 'customers:customer_lead',
+      enabled: true,
+      priority: 9,
+
+      buildSource: async (ctx: SearchBuildContext): Promise<SearchIndexSource | null> => {
+        const lines: string[] = []
+        const record = ctx.record
+        appendLine(lines, 'Name', record.display_name)
+        appendLine(lines, 'Email', record.primary_email)
+        appendLine(lines, 'Phone', record.primary_phone)
+        appendLine(lines, 'Source', record.source)
+        appendLine(lines, 'Notes', record.qualification_notes)
+        if (!lines.length) return null
+
+        const subtitleParts: string[] = []
+        if (record.primary_email) subtitleParts.push(String(record.primary_email))
+        if (record.source) subtitleParts.push(String(record.source))
+
+        return {
+          text: lines,
+          presenter: {
+            title: String(record.display_name ?? 'Lead'),
+            subtitle: subtitleParts.join(' · ') || undefined,
+            icon: 'user-plus',
+            badge: 'Lead',
+          },
+          checksumSource: {
+            displayName: record.display_name,
+            outcome: record.outcome,
+            email: record.primary_email,
+          },
+        }
+      },
+
+      formatResult: async (ctx: SearchBuildContext): Promise<SearchResultPresenter | null> => {
+        const { record } = ctx
+        const title = pickString(record.display_name as string, 'Lead')
+        const subtitleParts: string[] = []
+        if (record.primary_email) subtitleParts.push(String(record.primary_email))
+        if (record.source) subtitleParts.push(String(record.source))
+
+        return {
+          title: title ?? 'Lead',
+          subtitle: subtitleParts.length ? subtitleParts.join(' · ') : undefined,
+          icon: 'user-plus',
+          badge: 'Lead',
+        }
+      },
+
+      resolveUrl: async (ctx: SearchBuildContext): Promise<string | null> => {
+        const id = ctx.record.id
+        if (!id) return null
+        return `/backend/customers/leads/${encodeURIComponent(String(id))}`
+      },
+
+      resolveLinks: async (): Promise<SearchResultLink[] | null> => null,
+
+      fieldPolicy: {
+        searchable: ['display_name', 'primary_email', 'primary_phone', 'source', 'qualification_notes'],
+        hashOnly: [],
+        excluded: ['source_payload_raw', 'person_data', 'company_data', 'deal_data'],
+      },
+    },
   ],
 }
 

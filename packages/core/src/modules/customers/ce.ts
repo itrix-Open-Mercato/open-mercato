@@ -2,6 +2,7 @@ import {
   CUSTOMER_ACTIVITY_CUSTOM_FIELDS,
   CUSTOMER_COMPANY_CUSTOM_FIELDS,
   CUSTOMER_DEAL_CUSTOM_FIELDS,
+  CUSTOMER_LEAD_CUSTOM_FIELDS,
   CUSTOMER_PERSON_CUSTOM_FIELDS,
 } from './customFieldDefaults'
 
@@ -47,6 +48,14 @@ export const entities = [
     showInSidebar: false,
     defaultEditor: false,
     fields: CUSTOMER_ACTIVITY_CUSTOM_FIELDS,
+  },
+  {
+    id: 'customers:customer_lead',
+    label: 'Customer Lead',
+    description: 'Pre-CRM staging record for inbound qualification before conversion.',
+    labelField: 'displayName',
+    showInSidebar: false,
+    fields: CUSTOMER_LEAD_CUSTOM_FIELDS,
   },
 ]
 
