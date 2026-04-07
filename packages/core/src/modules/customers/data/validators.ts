@@ -23,6 +23,13 @@ const nextInteractionSchema = z
   .strict()
 
 const displayNameSchema = z.string().trim().min(1).max(200)
+const jsonRecordSchema = z.record(z.string(), z.unknown())
+const codeSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(120)
+  .regex(/^[a-z0-9_-]+$/, 'Code must be lowercase and may contain dashes or underscores')
 
 const baseEntitySchema = {
   displayName: displayNameSchema,
@@ -370,3 +377,157 @@ export type PipelineStageCreateInput = z.infer<typeof pipelineStageCreateSchema>
 export type PipelineStageUpdateInput = z.infer<typeof pipelineStageUpdateSchema>
 export type PipelineStageDeleteInput = z.infer<typeof pipelineStageDeleteSchema>
 export type PipelineStageReorderInput = z.infer<typeof pipelineStageReorderSchema>
+
+// --- Lead funnel schemas ---
+
+export const leadOutcomeSchema = z.enum(['open', 'won', 'lost'])
+export const leadStageKindSchema = z.enum(['open', 'won', 'lost'])
+export const leadBindingModeSchema = z.enum(['lead_only', 'prefill_only', 'shared'])
+export const leadTargetEntityKindSchema = z.enum(['person', 'company', 'deal'])
+export const leadFieldSectionKindSchema = z.enum(['lead', 'person', 'company', 'deal'])
+
+const leadPayloadSchema = {
+  pipelineId: uuid().optional(),
+  stageId: uuid().optional(),
+  outcome: leadOutcomeSchema.optional(),
+  lostReasonId: uuid().nullable().optional(),
+  displayName: displayNameSchema,
+  ownerUserId: uuid().nullable().optional(),
+  source: z.string().trim().max(150).nullable().optional(),
+  sourceChannel: z.string().trim().max(150).nullable().optional(),
+  sourceExternalId: z.string().trim().max(191).nullable().optional(),
+  sourcePayloadRaw: jsonRecordSchema.nullable().optional(),
+  sourceReceivedAt: z.coerce.date().nullable().optional(),
+  primaryEmail: z.string().trim().email().max(320).nullable().optional(),
+  primaryPhone: z.string().trim().max(50).nullable().optional(),
+  vatId: z.string().trim().max(80).nullable().optional(),
+  spamScore: z.coerce.number().min(0).max(1).nullable().optional(),
+  qualificationNotes: z.string().trim().max(8000).nullable().optional(),
+  personData: jsonRecordSchema.nullable().optional(),
+  companyData: jsonRecordSchema.nullable().optional(),
+  dealData: jsonRecordSchema.nullable().optional(),
+  createdPersonId: uuid().nullable().optional(),
+  createdCompanyId: uuid().nullable().optional(),
+  createdDealId: uuid().nullable().optional(),
+  linkedPersonId: uuid().nullable().optional(),
+  linkedCompanyId: uuid().nullable().optional(),
+  linkedDealId: uuid().nullable().optional(),
+  convertedAt: z.coerce.date().nullable().optional(),
+  convertedByUserId: uuid().nullable().optional(),
+}
+
+export const customerLeadCreateSchema = scopedSchema.extend(leadPayloadSchema)
+
+export const customerLeadUpdateSchema = z
+  .object({
+    id: uuid(),
+  })
+  .merge(scopedSchema.extend(leadPayloadSchema).partial())
+
+export const customerLeadDeleteSchema = scopedSchema.extend({
+  id: uuid(),
+})
+
+export const customerLeadPipelineCreateSchema = scopedSchema.extend({
+  name: z.string().trim().min(1).max(200),
+  code: codeSchema,
+  isDefault: z.boolean().optional(),
+  isActive: z.boolean().optional(),
+})
+
+export const customerLeadPipelineUpdateSchema = scopedSchema.extend({
+  id: uuid(),
+  name: z.string().trim().min(1).max(200).optional(),
+  code: codeSchema.optional(),
+  isDefault: z.boolean().optional(),
+  isActive: z.boolean().optional(),
+})
+
+export const customerLeadPipelineDeleteSchema = scopedSchema.extend({
+  id: uuid(),
+})
+
+export const customerLeadPipelineStageCreateSchema = scopedSchema.extend({
+  pipelineId: uuid(),
+  name: z.string().trim().min(1).max(200),
+  code: codeSchema,
+  position: z.number().int().min(0).optional(),
+  kind: leadStageKindSchema.optional(),
+  isActive: z.boolean().optional(),
+})
+
+export const customerLeadPipelineStageUpdateSchema = scopedSchema.extend({
+  id: uuid(),
+  pipelineId: uuid().optional(),
+  name: z.string().trim().min(1).max(200).optional(),
+  code: codeSchema.optional(),
+  position: z.number().int().min(0).optional(),
+  kind: leadStageKindSchema.optional(),
+  isActive: z.boolean().optional(),
+})
+
+export const customerLeadPipelineStageDeleteSchema = scopedSchema.extend({
+  id: uuid(),
+})
+
+export const customerLeadLostReasonCreateSchema = scopedSchema.extend({
+  pipelineId: uuid().nullable().optional(),
+  name: z.string().trim().min(1).max(200),
+  code: codeSchema,
+  isActive: z.boolean().optional(),
+  sortOrder: z.number().int().min(0).optional(),
+})
+
+export const customerLeadLostReasonUpdateSchema = scopedSchema.extend({
+  id: uuid(),
+  pipelineId: uuid().nullable().optional(),
+  name: z.string().trim().min(1).max(200).optional(),
+  code: codeSchema.optional(),
+  isActive: z.boolean().optional(),
+  sortOrder: z.number().int().min(0).optional(),
+})
+
+export const customerLeadLostReasonDeleteSchema = scopedSchema.extend({
+  id: uuid(),
+})
+
+export const customerLeadFieldBindingCreateSchema = scopedSchema.extend({
+  pipelineId: uuid().nullable().optional(),
+  leadFieldKey: z.string().trim().min(1).max(150),
+  bindingMode: leadBindingModeSchema,
+  targetEntityKind: leadTargetEntityKindSchema.nullable().optional(),
+  targetFieldKey: z.string().trim().max(150).nullable().optional(),
+  sectionKind: leadFieldSectionKindSchema,
+  isActive: z.boolean().optional(),
+})
+
+export const customerLeadFieldBindingUpdateSchema = scopedSchema.extend({
+  id: uuid(),
+  pipelineId: uuid().nullable().optional(),
+  leadFieldKey: z.string().trim().min(1).max(150).optional(),
+  bindingMode: leadBindingModeSchema.optional(),
+  targetEntityKind: leadTargetEntityKindSchema.nullable().optional(),
+  targetFieldKey: z.string().trim().max(150).nullable().optional(),
+  sectionKind: leadFieldSectionKindSchema.optional(),
+  isActive: z.boolean().optional(),
+})
+
+export const customerLeadFieldBindingDeleteSchema = scopedSchema.extend({
+  id: uuid(),
+})
+
+export type CustomerLeadCreateInput = z.infer<typeof customerLeadCreateSchema>
+export type CustomerLeadUpdateInput = z.infer<typeof customerLeadUpdateSchema>
+export type CustomerLeadDeleteInput = z.infer<typeof customerLeadDeleteSchema>
+export type CustomerLeadPipelineCreateInput = z.infer<typeof customerLeadPipelineCreateSchema>
+export type CustomerLeadPipelineUpdateInput = z.infer<typeof customerLeadPipelineUpdateSchema>
+export type CustomerLeadPipelineDeleteInput = z.infer<typeof customerLeadPipelineDeleteSchema>
+export type CustomerLeadPipelineStageCreateInput = z.infer<typeof customerLeadPipelineStageCreateSchema>
+export type CustomerLeadPipelineStageUpdateInput = z.infer<typeof customerLeadPipelineStageUpdateSchema>
+export type CustomerLeadPipelineStageDeleteInput = z.infer<typeof customerLeadPipelineStageDeleteSchema>
+export type CustomerLeadLostReasonCreateInput = z.infer<typeof customerLeadLostReasonCreateSchema>
+export type CustomerLeadLostReasonUpdateInput = z.infer<typeof customerLeadLostReasonUpdateSchema>
+export type CustomerLeadLostReasonDeleteInput = z.infer<typeof customerLeadLostReasonDeleteSchema>
+export type CustomerLeadFieldBindingCreateInput = z.infer<typeof customerLeadFieldBindingCreateSchema>
+export type CustomerLeadFieldBindingUpdateInput = z.infer<typeof customerLeadFieldBindingUpdateSchema>
+export type CustomerLeadFieldBindingDeleteInput = z.infer<typeof customerLeadFieldBindingDeleteSchema>

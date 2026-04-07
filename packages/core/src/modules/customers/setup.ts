@@ -1,5 +1,11 @@
 import type { ModuleSetupConfig } from '@open-mercato/shared/modules/setup'
-import { seedCustomerDictionaries, seedCurrencyDictionary, seedCustomerExamples, seedDefaultPipeline } from './cli'
+import {
+  seedCustomerDictionaries,
+  seedCurrencyDictionary,
+  seedCustomerExamples,
+  seedDefaultLeadPipeline,
+  seedDefaultPipeline,
+} from './cli'
 
 export const setup: ModuleSetupConfig = {
   seedDefaults: async (ctx) => {
@@ -7,6 +13,7 @@ export const setup: ModuleSetupConfig = {
     await seedCustomerDictionaries(ctx.em, scope)
     await seedCurrencyDictionary(ctx.em, scope)
     await seedDefaultPipeline(ctx.em, scope)
+    await seedDefaultLeadPipeline(ctx.em, scope)
   },
 
   seedExamples: async (ctx) => {
@@ -23,8 +30,13 @@ export const setup: ModuleSetupConfig = {
       'customers.companies.manage',
       'customers.deals.view',
       'customers.deals.manage',
+      'customers.leads.view',
+      'customers.leads.manage',
       'customers.pipelines.view',
       'customers.pipelines.manage',
+      'customers.lead-pipelines.view',
+      'customers.lead-pipelines.manage',
+      'customers.lead-field-bindings.manage',
     ],
     employee: [
       'customers.people.view',

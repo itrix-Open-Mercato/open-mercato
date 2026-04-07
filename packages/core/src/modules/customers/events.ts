@@ -21,6 +21,13 @@ const events = [
   { id: 'customers.deal.updated', label: 'Deal Updated', entity: 'deal', category: 'crud' },
   { id: 'customers.deal.deleted', label: 'Deal Deleted', entity: 'deal', category: 'crud' },
 
+  // Leads
+  { id: 'customers.lead.created', label: 'Lead Created', entity: 'lead', category: 'crud' },
+  { id: 'customers.lead.updated', label: 'Lead Updated', entity: 'lead', category: 'crud' },
+  { id: 'customers.lead.deleted', label: 'Lead Deleted', entity: 'lead', category: 'crud' },
+  { id: 'customers.lead.stage-changed', label: 'Lead Stage Changed', entity: 'lead', category: 'workflow' },
+  { id: 'customers.lead.converted', label: 'Lead Converted', entity: 'lead', category: 'workflow' },
+
   // Comments
   { id: 'customers.comment.created', label: 'Comment Created', entity: 'comment', category: 'crud' },
   { id: 'customers.comment.updated', label: 'Comment Updated', entity: 'comment', category: 'crud' },

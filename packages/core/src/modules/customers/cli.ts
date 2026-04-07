@@ -24,6 +24,9 @@ import {
   CustomerComment,
   CustomerPipeline,
   CustomerPipelineStage,
+  CustomerLeadPipeline,
+  CustomerLeadPipelineStage,
+  CustomerLeadLostReason,
 } from './data/entities'
 import { ensureDictionaryEntry } from './commands/shared'
 
@@ -60,6 +63,20 @@ const PIPELINE_STAGE_DEFAULTS: DictionaryDefault[] = [
   { value: 'loose', label: 'Loose', color: '#ef4444', icon: 'lucide:flag' },
   { value: 'stalled', label: 'Stalled', color: '#6b7280', icon: 'lucide:alert-circle' },
 ]
+
+const LEAD_PIPELINE_STAGE_DEFAULTS = [
+  { code: 'new', name: 'New', kind: 'open' },
+  { code: 'qualifying', name: 'Qualifying', kind: 'open' },
+  { code: 'won', name: 'Won', kind: 'won' },
+  { code: 'lost', name: 'Lost', kind: 'lost' },
+] as const
+
+const LEAD_LOST_REASON_DEFAULTS = [
+  { code: 'not_interested', name: 'Not interested' },
+  { code: 'budget', name: 'Budget' },
+  { code: 'competitor', name: 'Competitor' },
+  { code: 'spam', name: 'Spam' },
+] as const
 
 const ENTITY_STATUS_DEFAULTS: DictionaryDefault[] = [
   { value: 'customer', label: 'Customer', color: '#16a34a', icon: 'lucide:handshake' },
@@ -2822,7 +2839,59 @@ async function seedDefaultPipeline(em: EntityManager, { tenantId, organizationId
   await em.flush()
 }
 
-export { seedCustomerDictionaries, seedCustomerExamples, seedCustomerStressTest, seedCurrencyDictionary, seedDefaultPipeline }
+async function seedDefaultLeadPipeline(em: EntityManager, { tenantId, organizationId }: SeedArgs): Promise<void> {
+  const existing = await em.findOne(CustomerLeadPipeline, { tenantId, organizationId, isDefault: true })
+  if (existing) return
+
+  const pipeline = em.create(CustomerLeadPipeline, {
+    tenantId,
+    organizationId,
+    name: 'Default',
+    code: 'default',
+    isDefault: true,
+    isActive: true,
+  })
+  em.persist(pipeline)
+  await em.flush()
+
+  for (let i = 0; i < LEAD_PIPELINE_STAGE_DEFAULTS.length; i++) {
+    const entry = LEAD_PIPELINE_STAGE_DEFAULTS[i]
+    em.persist(em.create(CustomerLeadPipelineStage, {
+      tenantId,
+      organizationId,
+      pipelineId: pipeline.id,
+      name: entry.name,
+      code: entry.code,
+      kind: entry.kind,
+      position: i,
+      isActive: true,
+    }))
+  }
+
+  for (let i = 0; i < LEAD_LOST_REASON_DEFAULTS.length; i++) {
+    const entry = LEAD_LOST_REASON_DEFAULTS[i]
+    em.persist(em.create(CustomerLeadLostReason, {
+      tenantId,
+      organizationId,
+      pipelineId: pipeline.id,
+      name: entry.name,
+      code: entry.code,
+      sortOrder: i,
+      isActive: true,
+    }))
+  }
+
+  await em.flush()
+}
+
+export {
+  seedCustomerDictionaries,
+  seedCustomerExamples,
+  seedCustomerStressTest,
+  seedCurrencyDictionary,
+  seedDefaultLeadPipeline,
+  seedDefaultPipeline,
+}
 export type { SeedArgs as CustomerSeedArgs }
 
 const customersCliCommands = [seedDictionaries, seedExamples, seedStressTest]
