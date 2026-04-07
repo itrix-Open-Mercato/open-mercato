@@ -169,14 +169,20 @@ export class TenantDataEncryptionService {
       }
       const mem = this.memoryCache.get(tag)
       if (mem) return mem
-      if (this.cache && typeof this.cache.get === 'function') {
-        const cached = await this.cache.get(tag)
-        if (cached) return cached as EncryptionMapRecord
-      }
-      const pending = this.fetchMap(candidate)
+      const pending = (async () => {
+        if (this.cache && typeof this.cache.get === 'function') {
+          const cached = await this.cache.get(tag)
+          if (cached) return cached as EncryptionMapRecord
+        }
+        return this.fetchMap(candidate)
+      })()
       this.inflightMaps.set(tag, pending)
-      const loaded = await pending
-      this.inflightMaps.delete(tag)
+      let loaded: EncryptionMapRecord | null
+      try {
+        loaded = await pending
+      } finally {
+        this.inflightMaps.delete(tag)
+      }
       if (!loaded) {
         recordMiss(tag)
         debug('🔍 encmap.miss', {
