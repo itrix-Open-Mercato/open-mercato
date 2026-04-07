@@ -453,6 +453,36 @@ export const customerLeadDuplicateCheckSchema = scopedSchema.extend({
   vatId: z.string().trim().max(80).nullable().optional(),
 })
 
+export const customerLeadLinkPersonSchema = scopedSchema.extend({
+  leadId: uuid(),
+  personId: uuid(),
+})
+
+export const customerLeadLinkCompanySchema = scopedSchema.extend({
+  leadId: uuid(),
+  companyId: uuid(),
+})
+
+export const customerLeadLinkDealSchema = scopedSchema.extend({
+  leadId: uuid(),
+  dealId: uuid(),
+})
+
+export const customerLeadCreatePersonSchema = scopedSchema.extend({
+  leadId: uuid(),
+  overrides: personCreateSchema.partial().optional(),
+})
+
+export const customerLeadCreateCompanySchema = scopedSchema.extend({
+  leadId: uuid(),
+  overrides: companyCreateSchema.partial().optional(),
+})
+
+export const customerLeadCreateDealSchema = scopedSchema.extend({
+  leadId: uuid(),
+  overrides: dealCreateSchema.partial().optional(),
+})
+
 export const customerLeadPipelineCreateSchema = scopedSchema.extend({
   name: z.string().trim().min(1).max(200),
   code: codeSchema,
@@ -548,6 +578,12 @@ export type CustomerLeadAssignInput = z.infer<typeof customerLeadAssignSchema>
 export type CustomerLeadAdvanceStageInput = z.infer<typeof customerLeadAdvanceStageSchema>
 export type CustomerLeadMarkLostInput = z.infer<typeof customerLeadMarkLostSchema>
 export type CustomerLeadDuplicateCheckInput = z.infer<typeof customerLeadDuplicateCheckSchema>
+export type CustomerLeadLinkPersonInput = z.infer<typeof customerLeadLinkPersonSchema>
+export type CustomerLeadLinkCompanyInput = z.infer<typeof customerLeadLinkCompanySchema>
+export type CustomerLeadLinkDealInput = z.infer<typeof customerLeadLinkDealSchema>
+export type CustomerLeadCreatePersonInput = z.infer<typeof customerLeadCreatePersonSchema>
+export type CustomerLeadCreateCompanyInput = z.infer<typeof customerLeadCreateCompanySchema>
+export type CustomerLeadCreateDealInput = z.infer<typeof customerLeadCreateDealSchema>
 export type CustomerLeadPipelineCreateInput = z.infer<typeof customerLeadPipelineCreateSchema>
 export type CustomerLeadPipelineUpdateInput = z.infer<typeof customerLeadPipelineUpdateSchema>
 export type CustomerLeadPipelineDeleteInput = z.infer<typeof customerLeadPipelineDeleteSchema>

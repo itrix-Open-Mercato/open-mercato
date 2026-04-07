@@ -48,6 +48,17 @@ type LeadLostReason = {
   isActive: boolean
 }
 
+type LeadFieldBinding = {
+  id: string
+  pipelineId?: string | null
+  leadFieldKey: string
+  bindingMode: 'lead_only' | 'prefill_only' | 'shared'
+  targetEntityKind?: 'person' | 'company' | 'deal' | null
+  targetFieldKey?: string | null
+  sectionKind: 'lead' | 'person' | 'company' | 'deal'
+  isActive: boolean
+}
+
 type LeadHistoryEntry = {
   id: string
   eventType: string
@@ -79,6 +90,9 @@ type LeadRow = {
   primaryPhone?: string | null
   vatId?: string | null
   ownerUserId?: string | null
+  linkedPersonId?: string | null
+  linkedCompanyId?: string | null
+  linkedDealId?: string | null
   createdAt?: string | null
   updatedAt?: string | null
 } & Record<string, unknown>
@@ -166,6 +180,27 @@ function mapLostReason(item: Record<string, unknown>): LeadLostReason | null {
   }
 }
 
+function mapFieldBinding(item: Record<string, unknown>): LeadFieldBinding | null {
+  const id = typeof item.id === 'string' ? item.id : null
+  const leadFieldKey = typeof item.lead_field_key === 'string' ? item.lead_field_key : null
+  if (!id || !leadFieldKey) return null
+  const bindingMode = item.binding_mode === 'shared' || item.binding_mode === 'prefill_only' ? item.binding_mode : 'lead_only'
+  const targetEntityKind = item.target_entity_kind === 'person' || item.target_entity_kind === 'company' || item.target_entity_kind === 'deal'
+    ? item.target_entity_kind
+    : null
+  const sectionKind = item.section_kind === 'person' || item.section_kind === 'company' || item.section_kind === 'deal' ? item.section_kind : 'lead'
+  return {
+    id,
+    pipelineId: typeof item.pipeline_id === 'string' ? item.pipeline_id : null,
+    leadFieldKey,
+    bindingMode,
+    targetEntityKind,
+    targetFieldKey: typeof item.target_field_key === 'string' ? item.target_field_key : null,
+    sectionKind,
+    isActive: item.is_active !== false && item.isActive !== false,
+  }
+}
+
 function mapLead(item: Record<string, unknown>): LeadRow | null {
   const id = typeof item.id === 'string' ? item.id : null
   if (!id) return null
@@ -182,6 +217,9 @@ function mapLead(item: Record<string, unknown>): LeadRow | null {
     primaryPhone: typeof item.primary_phone === 'string' ? item.primary_phone : null,
     vatId: typeof item.vat_id === 'string' ? item.vat_id : null,
     ownerUserId: typeof item.owner_user_id === 'string' ? item.owner_user_id : null,
+    linkedPersonId: typeof item.linked_person_id === 'string' ? item.linked_person_id : null,
+    linkedCompanyId: typeof item.linked_company_id === 'string' ? item.linked_company_id : null,
+    linkedDealId: typeof item.linked_deal_id === 'string' ? item.linked_deal_id : null,
     createdAt: typeof item.created_at === 'string' ? item.created_at : null,
     updatedAt: typeof item.updated_at === 'string' ? item.updated_at : null,
   }, item)
@@ -681,6 +719,9 @@ export function LeadDetailClient({ id }: { id: string }) {
   const [selectedStageId, setSelectedStageId] = React.useState('')
   const [selectedLostReasonId, setSelectedLostReasonId] = React.useState('')
   const [ownerUserId, setOwnerUserId] = React.useState('')
+  const [linkPersonId, setLinkPersonId] = React.useState('')
+  const [linkCompanyId, setLinkCompanyId] = React.useState('')
+  const [linkDealId, setLinkDealId] = React.useState('')
   const [reloadToken, setReloadToken] = React.useState(0)
 
   React.useEffect(() => {
@@ -700,6 +741,9 @@ export function LeadDetailClient({ id }: { id: string }) {
         if (next) {
           setSelectedStageId(next.stageId)
           setOwnerUserId(next.ownerUserId ?? '')
+          setLinkPersonId(next.linkedPersonId ?? '')
+          setLinkCompanyId(next.linkedCompanyId ?? '')
+          setLinkDealId(next.linkedDealId ?? '')
           const [nextConfig, nextHistory, nextDuplicates] = await Promise.all([
             loadLeadConfig(),
             loadLeadHistory(next.id),
@@ -745,6 +789,45 @@ export function LeadDetailClient({ id }: { id: string }) {
     }
     flash(t('customers.leads.detail.stageAdvanced', 'Lead stage updated.'), 'success')
     setReloadToken((value) => value + 1)
+  }
+
+  async function runLeadAction(endpoint: string, body: Record<string, unknown>, successMessage: string, errorMessage: string) {
+    const result = await apiCall(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!result.ok) {
+      flash(errorMessage, 'error')
+      return
+    }
+    flash(successMessage, 'success')
+    setReloadToken((value) => value + 1)
+  }
+
+  async function linkTarget(kind: 'person' | 'company' | 'deal') {
+    if (!lead) return
+    const value = kind === 'person' ? linkPersonId.trim() : kind === 'company' ? linkCompanyId.trim() : linkDealId.trim()
+    if (!value) {
+      flash(t('customers.leads.detail.linkIdRequired', 'Target id is required.'), 'error')
+      return
+    }
+    await runLeadAction(
+      `/api/customers/leads/link-${kind}`,
+      { leadId: lead.id, [`${kind}Id`]: value },
+      t('customers.leads.detail.linked', 'Target linked.'),
+      t('customers.leads.detail.linkError', 'Failed to link target.'),
+    )
+  }
+
+  async function createTarget(kind: 'person' | 'company' | 'deal') {
+    if (!lead) return
+    await runLeadAction(
+      `/api/customers/leads/create-${kind}`,
+      { leadId: lead.id },
+      t('customers.leads.detail.targetCreated', 'Target created and linked.'),
+      t('customers.leads.detail.targetCreateError', 'Failed to create target from lead.'),
+    )
   }
 
   async function assignOwner() {
@@ -812,6 +895,50 @@ export function LeadDetailClient({ id }: { id: string }) {
           </div>
         </div>
       </section>
+      <section className="rounded-lg border bg-card p-4">
+        <h2 className="text-lg font-semibold">{t('customers.leads.detail.linksConversion', 'Links & conversion')}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {t('customers.leads.detail.linksDescription', 'Link existing CRM records or create staging targets from this lead without closing the lead.')}
+        </p>
+        <div className="mt-4 grid gap-4 lg:grid-cols-3">
+          <div className="space-y-3 rounded-md border p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="font-medium">{t('customers.leads.detail.personTarget', 'Person')}</div>
+              {lead.linkedPersonId ? <Badge variant="secondary">{t('customers.leads.detail.linkedBadge', 'Linked')}</Badge> : null}
+            </div>
+            {lead.linkedPersonId ? <Link className="text-sm underline" href={`/backend/customers/people/${lead.linkedPersonId}`}>{lead.linkedPersonId}</Link> : null}
+            <Input value={linkPersonId} onChange={(event) => setLinkPersonId(event.target.value)} placeholder="person entity id" />
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={() => void linkTarget('person')}>{t('customers.leads.detail.link', 'Link')}</Button>
+              <Button size="sm" onClick={() => void createTarget('person')}>{t('customers.leads.detail.create', 'Create')}</Button>
+            </div>
+          </div>
+          <div className="space-y-3 rounded-md border p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="font-medium">{t('customers.leads.detail.companyTarget', 'Company')}</div>
+              {lead.linkedCompanyId ? <Badge variant="secondary">{t('customers.leads.detail.linkedBadge', 'Linked')}</Badge> : null}
+            </div>
+            {lead.linkedCompanyId ? <Link className="text-sm underline" href={`/backend/customers/companies/${lead.linkedCompanyId}`}>{lead.linkedCompanyId}</Link> : null}
+            <Input value={linkCompanyId} onChange={(event) => setLinkCompanyId(event.target.value)} placeholder="company entity id" />
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={() => void linkTarget('company')}>{t('customers.leads.detail.link', 'Link')}</Button>
+              <Button size="sm" onClick={() => void createTarget('company')}>{t('customers.leads.detail.create', 'Create')}</Button>
+            </div>
+          </div>
+          <div className="space-y-3 rounded-md border p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="font-medium">{t('customers.leads.detail.dealTarget', 'Deal')}</div>
+              {lead.linkedDealId ? <Badge variant="secondary">{t('customers.leads.detail.linkedBadge', 'Linked')}</Badge> : null}
+            </div>
+            {lead.linkedDealId ? <Link className="text-sm underline" href={`/backend/customers/deals/${lead.linkedDealId}`}>{lead.linkedDealId}</Link> : null}
+            <Input value={linkDealId} onChange={(event) => setLinkDealId(event.target.value)} placeholder="deal id" />
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={() => void linkTarget('deal')}>{t('customers.leads.detail.link', 'Link')}</Button>
+              <Button size="sm" onClick={() => void createTarget('deal')}>{t('customers.leads.detail.create', 'Create')}</Button>
+            </div>
+          </div>
+        </div>
+      </section>
       <LeadFormClient mode="edit" leadId={id} initialValues={leadToFormValues(lead)} />
       <section className="rounded-lg border bg-card p-4">
         <h2 className="text-lg font-semibold">{t('customers.leads.detail.history', 'Lead history')}</h2>
@@ -835,20 +962,29 @@ export function LeadConfigClient() {
   const [pipelines, setPipelines] = React.useState<LeadPipeline[]>([])
   const [stages, setStages] = React.useState<LeadStage[]>([])
   const [lostReasons, setLostReasons] = React.useState<LeadLostReason[]>([])
+  const [fieldBindings, setFieldBindings] = React.useState<LeadFieldBinding[]>([])
   const [isLoading, setIsLoading] = React.useState(true)
   const [pipelineName, setPipelineName] = React.useState('')
   const [pipelineCode, setPipelineCode] = React.useState('')
+  const [bindingLeadField, setBindingLeadField] = React.useState('')
+  const [bindingTargetField, setBindingTargetField] = React.useState('')
+  const [bindingMode, setBindingMode] = React.useState<LeadFieldBinding['bindingMode']>('shared')
+  const [bindingTargetKind, setBindingTargetKind] = React.useState<'person' | 'company' | 'deal'>('person')
   const [reloadToken, setReloadToken] = React.useState(0)
 
   React.useEffect(() => {
     let cancelled = false
     setIsLoading(true)
-    loadLeadConfig()
-      .then((config) => {
+    Promise.all([
+      loadLeadConfig(),
+      readApiResultOrThrow<ListResponse<Record<string, unknown>>>('/api/customers/lead-field-bindings?pageSize=100'),
+    ])
+      .then(([config, bindingsPayload]) => {
         if (cancelled) return
         setPipelines(config.pipelines)
         setStages(config.stages)
         setLostReasons(config.lostReasons)
+        setFieldBindings((bindingsPayload.items ?? []).map(mapFieldBinding).filter((item): item is LeadFieldBinding => item !== null))
       })
       .catch(() => {
         if (!cancelled) flash(t('customers.leads.config.loadError', 'Failed to load lead funnel configuration.'), 'error')
@@ -877,6 +1013,32 @@ export function LeadConfigClient() {
     setPipelineName('')
     setPipelineCode('')
     flash(t('customers.leads.config.pipelineCreated', 'Lead pipeline created.'), 'success')
+    setReloadToken((value) => value + 1)
+  }
+
+  async function createFieldBinding() {
+    const leadFieldKey = bindingLeadField.trim()
+    const targetFieldKey = bindingTargetField.trim()
+    if (!leadFieldKey) return
+    const response = await apiCall('/api/customers/lead-field-bindings', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        leadFieldKey,
+        bindingMode,
+        targetEntityKind: bindingMode === 'lead_only' ? null : bindingTargetKind,
+        targetFieldKey: bindingMode === 'lead_only' ? null : targetFieldKey || null,
+        sectionKind: bindingMode === 'lead_only' ? 'lead' : bindingTargetKind,
+        isActive: true,
+      }),
+    })
+    if (!response.ok) {
+      flash(t('customers.leads.config.createBindingError', 'Failed to create field binding.'), 'error')
+      return
+    }
+    setBindingLeadField('')
+    setBindingTargetField('')
+    flash(t('customers.leads.config.bindingCreated', 'Field binding created.'), 'success')
     setReloadToken((value) => value + 1)
   }
 
@@ -911,6 +1073,45 @@ export function LeadConfigClient() {
             </div>
           ))}
           {!pipelines.length ? <p className="text-sm text-muted-foreground">{t('customers.leads.config.empty', 'No lead pipelines yet.')}</p> : null}
+        </div>
+      </section>
+      <section className="rounded-lg border bg-card p-4 shadow-sm">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">{t('customers.leads.config.fieldBindings', 'Lead field bindings')}</h2>
+            <p className="text-sm text-muted-foreground">{t('customers.leads.config.fieldBindingsDescription', 'Mark lead fields as lead-only, prefill-only, or shared write-through fields.')}</p>
+          </div>
+          <Button onClick={createFieldBinding}>{t('customers.leads.config.addBinding', 'Add binding')}</Button>
+        </div>
+        <div className="mb-4 grid gap-3 md:grid-cols-4">
+          <Input value={bindingLeadField} onChange={(event) => setBindingLeadField(event.target.value)} placeholder="lead field, e.g. primaryEmail" />
+          <select className="h-9 rounded-md border bg-background px-3 text-sm" value={bindingMode} onChange={(event) => setBindingMode(event.target.value as LeadFieldBinding['bindingMode'])}>
+            <option value="shared">Shared</option>
+            <option value="prefill_only">Prefill only</option>
+            <option value="lead_only">Lead only</option>
+          </select>
+          <select className="h-9 rounded-md border bg-background px-3 text-sm" value={bindingTargetKind} onChange={(event) => setBindingTargetKind(event.target.value as 'person' | 'company' | 'deal')} disabled={bindingMode === 'lead_only'}>
+            <option value="person">Person</option>
+            <option value="company">Company</option>
+            <option value="deal">Deal</option>
+          </select>
+          <Input value={bindingTargetField} onChange={(event) => setBindingTargetField(event.target.value)} placeholder="target field, e.g. primaryEmail" disabled={bindingMode === 'lead_only'} />
+        </div>
+        <div className="space-y-2">
+          {fieldBindings.map((binding) => (
+            <div key={binding.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3 text-sm">
+              <div>
+                <span className="font-medium">{binding.leadFieldKey}</span>
+                {binding.targetEntityKind && binding.targetFieldKey ? <span className="text-muted-foreground">{' -> '}{binding.targetEntityKind}.{binding.targetFieldKey}</span> : null}
+              </div>
+              <div className="flex gap-2">
+                <Badge variant={binding.bindingMode === 'shared' ? 'default' : 'secondary'}>{binding.bindingMode}</Badge>
+                <Badge variant="outline">{binding.sectionKind}</Badge>
+                {!binding.isActive ? <Badge variant="destructive">{t('customers.leads.config.inactive', 'Inactive')}</Badge> : null}
+              </div>
+            </div>
+          ))}
+          {!fieldBindings.length ? <p className="text-sm text-muted-foreground">{t('customers.leads.config.noFieldBindings', 'No field bindings configured yet.')}</p> : null}
         </div>
       </section>
     </div>
