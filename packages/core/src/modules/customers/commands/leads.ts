@@ -28,6 +28,7 @@ import {
   customerLeadLinkPersonSchema,
   customerLeadLinkCompanySchema,
   customerLeadLinkDealSchema,
+  customerLeadUnlinkTargetSchema,
   customerLeadCreatePersonSchema,
   customerLeadCreateCompanySchema,
   customerLeadCreateDealSchema,
@@ -41,6 +42,7 @@ import {
   type CustomerLeadLinkPersonInput,
   type CustomerLeadLinkCompanyInput,
   type CustomerLeadLinkDealInput,
+  type CustomerLeadUnlinkTargetInput,
   type CustomerLeadCreatePersonInput,
   type CustomerLeadCreateCompanyInput,
   type CustomerLeadCreateDealInput,
@@ -709,6 +711,70 @@ const linkLeadDealCommand: CommandHandler<CustomerLeadLinkDealInput, void> = {
   },
 }
 
+const unlinkLeadPersonCommand: CommandHandler<CustomerLeadUnlinkTargetInput, void> = {
+  id: 'customers.leads.unlink-person',
+  async execute(rawInput, ctx) {
+    const parsed = customerLeadUnlinkTargetSchema.parse(rawInput)
+    ensureTenantScope(ctx, parsed.tenantId)
+    ensureOrganizationScope(ctx, parsed.organizationId)
+    const em = (ctx.container.resolve('em') as EntityManager).fork()
+    const lead = await loadLeadForAction(em, parsed.leadId, parsed)
+    const previousPersonId = lead.linkedPersonId ?? null
+    const previousDealId = lead.linkedDealId ?? null
+    if (!previousPersonId && !previousDealId) return
+    lead.linkedPersonId = null
+    lead.linkedDealId = null
+    lead.updatedAt = new Date()
+    addLeadHistory(em, lead, 'person_unlinked', getActorUserId(ctx), { personId: previousPersonId, dealId: previousDealId })
+    await em.flush()
+    await emitLeadUpsert(ctx, lead)
+  },
+}
+
+const unlinkLeadCompanyCommand: CommandHandler<CustomerLeadUnlinkTargetInput, void> = {
+  id: 'customers.leads.unlink-company',
+  async execute(rawInput, ctx) {
+    const parsed = customerLeadUnlinkTargetSchema.parse(rawInput)
+    ensureTenantScope(ctx, parsed.tenantId)
+    ensureOrganizationScope(ctx, parsed.organizationId)
+    const em = (ctx.container.resolve('em') as EntityManager).fork()
+    const lead = await loadLeadForAction(em, parsed.leadId, parsed)
+    const previousCompanyId = lead.linkedCompanyId ?? null
+    const previousPersonId = lead.linkedPersonId ?? null
+    const previousDealId = lead.linkedDealId ?? null
+    if (!previousCompanyId && !previousPersonId && !previousDealId) return
+    lead.linkedCompanyId = null
+    lead.linkedPersonId = null
+    lead.linkedDealId = null
+    lead.updatedAt = new Date()
+    addLeadHistory(em, lead, 'company_unlinked', getActorUserId(ctx), {
+      companyId: previousCompanyId,
+      personId: previousPersonId,
+      dealId: previousDealId,
+    })
+    await em.flush()
+    await emitLeadUpsert(ctx, lead)
+  },
+}
+
+const unlinkLeadDealCommand: CommandHandler<CustomerLeadUnlinkTargetInput, void> = {
+  id: 'customers.leads.unlink-deal',
+  async execute(rawInput, ctx) {
+    const parsed = customerLeadUnlinkTargetSchema.parse(rawInput)
+    ensureTenantScope(ctx, parsed.tenantId)
+    ensureOrganizationScope(ctx, parsed.organizationId)
+    const em = (ctx.container.resolve('em') as EntityManager).fork()
+    const lead = await loadLeadForAction(em, parsed.leadId, parsed)
+    const previousDealId = lead.linkedDealId ?? null
+    if (!previousDealId) return
+    lead.linkedDealId = null
+    lead.updatedAt = new Date()
+    addLeadHistory(em, lead, 'deal_unlinked', getActorUserId(ctx), { dealId: previousDealId })
+    await em.flush()
+    await emitLeadUpsert(ctx, lead)
+  },
+}
+
 const createLeadPersonCommand: CommandHandler<CustomerLeadCreatePersonInput, { personId: string; entityId: string }> = {
   id: 'customers.leads.create-person',
   async execute(rawInput, ctx) {
@@ -1013,6 +1079,9 @@ registerCommand(markLeadLostCommand)
 registerCommand(linkLeadPersonCommand)
 registerCommand(linkLeadCompanyCommand)
 registerCommand(linkLeadDealCommand)
+registerCommand(unlinkLeadPersonCommand)
+registerCommand(unlinkLeadCompanyCommand)
+registerCommand(unlinkLeadDealCommand)
 registerCommand(createLeadPersonCommand)
 registerCommand(createLeadCompanyCommand)
 registerCommand(createLeadDealCommand)
@@ -1028,6 +1097,9 @@ export {
   linkLeadPersonCommand,
   linkLeadCompanyCommand,
   linkLeadDealCommand,
+  unlinkLeadPersonCommand,
+  unlinkLeadCompanyCommand,
+  unlinkLeadDealCommand,
   createLeadPersonCommand,
   createLeadCompanyCommand,
   createLeadDealCommand,

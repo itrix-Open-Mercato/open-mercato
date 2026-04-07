@@ -124,6 +124,10 @@ type ListResponse<T> = {
   totalPages?: number
 }
 
+type UserListResponse = {
+  items?: Array<Record<string, unknown>>
+}
+
 type TargetKind = 'person' | 'company' | 'deal'
 
 const leadFormSchema = z.object({
@@ -330,6 +334,30 @@ async function searchLeadTargets(kind: TargetKind, query: string, filters: { com
   const payload = await readApiResultOrThrow<ListResponse<Record<string, unknown>>>(`/api/customers/${resource}?${params.toString()}`)
   return (payload.items ?? [])
     .map((item) => targetOptionFromRecord(item, kind))
+    .filter((item): item is ComboboxOption => item !== null)
+}
+
+function userOptionFromRecord(record: Record<string, unknown>): ComboboxOption | null {
+  const id = typeof record.id === 'string' ? record.id : null
+  const email = typeof record.email === 'string' ? record.email : null
+  if (!id || !email) return null
+  const organizationName = typeof record.organizationName === 'string' && record.organizationName.trim()
+    ? record.organizationName.trim()
+    : null
+  return {
+    value: id,
+    label: email,
+    description: organizationName,
+  }
+}
+
+async function searchLeadOwners(query: string, id?: string | null): Promise<ComboboxOption[]> {
+  const params = new URLSearchParams({ page: '1', pageSize: '20' })
+  if (id) params.set('id', id)
+  else if (query.trim()) params.set('search', query.trim())
+  const payload = await readApiResultOrThrow<UserListResponse>(`/api/auth/users?${params.toString()}`)
+  return (payload.items ?? [])
+    .map((item) => userOptionFromRecord(item))
     .filter((item): item is ComboboxOption => item !== null)
 }
 
@@ -886,6 +914,7 @@ export function LeadDetailClient({ id }: { id: string }) {
   const [selectedStageId, setSelectedStageId] = React.useState('')
   const [selectedLostReasonId, setSelectedLostReasonId] = React.useState('')
   const [ownerUserId, setOwnerUserId] = React.useState('')
+  const [ownerOptions, setOwnerOptions] = React.useState<ComboboxOption[]>([])
   const [linkPersonId, setLinkPersonId] = React.useState('')
   const [linkCompanyId, setLinkCompanyId] = React.useState('')
   const [linkDealId, setLinkDealId] = React.useState('')
@@ -895,6 +924,20 @@ export function LeadDetailClient({ id }: { id: string }) {
   const [convertWonStageId, setConvertWonStageId] = React.useState('')
   const [convertNote, setConvertNote] = React.useState('')
   const [reloadToken, setReloadToken] = React.useState(0)
+
+  const registerOwnerOptions = React.useCallback((next: ComboboxOption[]) => {
+    setOwnerOptions((current) => {
+      const map = new Map(current.map((option) => [option.value, option]))
+      next.forEach((option) => map.set(option.value, option))
+      return Array.from(map.values())
+    })
+  }, [])
+
+  const loadOwnerSuggestions = React.useCallback(async (query?: string) => {
+    const options = await searchLeadOwners(query ?? '')
+    registerOwnerOptions(options)
+    return options
+  }, [registerOwnerOptions])
 
   React.useEffect(() => {
     let cancelled = false
@@ -920,15 +963,17 @@ export function LeadDetailClient({ id }: { id: string }) {
           setConvertCreateCompany(false)
           setConvertCreateDeal(false)
           setConvertNote('')
-          const [nextConfig, nextHistory, nextDuplicates] = await Promise.all([
+          const [nextConfig, nextHistory, nextDuplicates, nextOwnerOptions] = await Promise.all([
             loadLeadConfig(),
             loadLeadHistory(next.id),
             checkLeadDuplicates(next).catch(() => ({ people: [], companies: [], total: 0 })),
+            next.ownerUserId ? searchLeadOwners('', next.ownerUserId).catch(() => []) : Promise.resolve([]),
           ])
           if (!cancelled) {
             setConfig({ stages: nextConfig.stages, lostReasons: nextConfig.lostReasons })
             setHistory(nextHistory)
             setDuplicates(nextDuplicates)
+            registerOwnerOptions(nextOwnerOptions)
           }
         }
       } catch (err) {
@@ -941,7 +986,7 @@ export function LeadDetailClient({ id }: { id: string }) {
     return () => {
       cancelled = true
     }
-  }, [id, reloadToken, t])
+  }, [id, registerOwnerOptions, reloadToken, t])
 
   async function advanceStage() {
     if (!lead || !selectedStageId) return
@@ -1001,6 +1046,16 @@ export function LeadDetailClient({ id }: { id: string }) {
       { leadId: lead.id, [`${kind}Id`]: value },
       t('customers.leads.detail.linked', 'Target linked.'),
       t('customers.leads.detail.linkError', 'Failed to link target.'),
+    )
+  }
+
+  async function unlinkTarget(kind: TargetKind) {
+    if (!lead) return
+    await runLeadAction(
+      `/api/customers/leads/unlink-${kind}`,
+      { leadId: lead.id },
+      t('customers.leads.detail.unlinked', 'Target unlinked.'),
+      t('customers.leads.detail.unlinkError', 'Failed to unlink target.'),
     )
   }
 
@@ -1093,8 +1148,17 @@ export function LeadDetailClient({ id }: { id: string }) {
             <Button onClick={() => void advanceStage()}>{t('customers.leads.detail.advanceStage', 'Update stage')}</Button>
           </div>
           <div className="space-y-2 md:col-span-2">
-            <label className="text-sm font-medium">{t('customers.leads.detail.ownerUserId', 'Owner user ID')}</label>
-            <Input value={ownerUserId} onChange={(event) => setOwnerUserId(event.target.value)} placeholder="00000000-0000-0000-0000-000000000000" />
+            <label className="text-sm font-medium">{t('customers.leads.detail.ownerUserId', 'Owner')}</label>
+            <ComboboxInput
+              value={ownerUserId}
+              onChange={setOwnerUserId}
+              suggestions={ownerOptions}
+              loadSuggestions={loadOwnerSuggestions}
+              resolveLabel={(value) => ownerOptions.find((option) => option.value === value)?.label ?? value}
+              resolveDescription={(value) => ownerOptions.find((option) => option.value === value)?.description ?? null}
+              placeholder={t('customers.leads.detail.searchOwner', 'Search owner by email...')}
+              allowCustomValues={false}
+            />
           </div>
           <div className="flex items-end">
             <Button variant="outline" onClick={() => void assignOwner()}>{t('customers.leads.detail.assign', 'Assign')}</Button>
@@ -1113,7 +1177,12 @@ export function LeadDetailClient({ id }: { id: string }) {
               {lead.linkedCompanyId ? <Badge variant="secondary">{t('customers.leads.detail.linkedBadge', 'Linked')}</Badge> : <Badge variant="outline">{t('customers.leads.detail.stepOne', 'Step 1')}</Badge>}
             </div>
             <p className="text-xs text-muted-foreground">{t('customers.leads.detail.companyFirstHint', 'Start by choosing the company account for this lead.')}</p>
-            {lead.linkedCompanyId ? <Link className="text-sm underline" href={`/backend/customers/companies/${lead.linkedCompanyId}`}>{t('customers.leads.detail.openLinkedCompany', 'Open linked company')}</Link> : null}
+            {lead.linkedCompanyId ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Link className="text-sm underline" href={`/backend/customers/companies/${lead.linkedCompanyId}`}>{t('customers.leads.detail.openLinkedCompany', 'Open linked company')}</Link>
+                <Button size="sm" variant="outline" onClick={() => void unlinkTarget('company')}>{t('customers.leads.detail.unlinkCompany', 'Unlink company')}</Button>
+              </div>
+            ) : null}
             <ComboboxInput
               value={linkCompanyId}
               onChange={(value) => {
@@ -1140,7 +1209,12 @@ export function LeadDetailClient({ id }: { id: string }) {
                 ? t('customers.leads.detail.personSecondHint', 'Suggestions are limited to people linked to the selected company.')
                 : t('customers.leads.detail.personBlockedHint', 'Choose and link a company first.')}
             </p>
-            {lead.linkedPersonId ? <Link className="text-sm underline" href={`/backend/customers/people/${lead.linkedPersonId}`}>{t('customers.leads.detail.openLinkedPerson', 'Open linked person')}</Link> : null}
+            {lead.linkedPersonId ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Link className="text-sm underline" href={`/backend/customers/people/${lead.linkedPersonId}`}>{t('customers.leads.detail.openLinkedPerson', 'Open linked person')}</Link>
+                <Button size="sm" variant="outline" onClick={() => void unlinkTarget('person')}>{t('customers.leads.detail.unlinkPerson', 'Unlink person')}</Button>
+              </div>
+            ) : null}
             <ComboboxInput
               value={linkPersonId}
               onChange={(value) => {
@@ -1171,7 +1245,12 @@ export function LeadDetailClient({ id }: { id: string }) {
                 ? t('customers.leads.detail.dealThirdHint', 'Suggestions are limited to deals assigned to the linked company and person.')
                 : t('customers.leads.detail.dealBlockedHint', 'Link a company and person first.')}
             </p>
-            {lead.linkedDealId ? <Link className="text-sm underline" href={`/backend/customers/deals/${lead.linkedDealId}`}>{t('customers.leads.detail.openLinkedDeal', 'Open linked deal')}</Link> : null}
+            {lead.linkedDealId ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Link className="text-sm underline" href={`/backend/customers/deals/${lead.linkedDealId}`}>{t('customers.leads.detail.openLinkedDeal', 'Open linked deal')}</Link>
+                <Button size="sm" variant="outline" onClick={() => void unlinkTarget('deal')}>{t('customers.leads.detail.unlinkDeal', 'Unlink deal')}</Button>
+              </div>
+            ) : null}
             <ComboboxInput
               value={linkDealId}
               onChange={setLinkDealId}

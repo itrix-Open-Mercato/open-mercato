@@ -7,6 +7,7 @@ import {
   customerLeadLinkCompanySchema,
   customerLeadLinkDealSchema,
   customerLeadLinkPersonSchema,
+  customerLeadUnlinkTargetSchema,
 } from '../validators'
 
 const tenantId = '11111111-1111-4111-8111-111111111111'
@@ -23,6 +24,7 @@ describe('customer lead validators', () => {
     expect(customerLeadLinkPersonSchema.parse({ ...scope, leadId, personId })).toMatchObject({ leadId, personId })
     expect(customerLeadLinkCompanySchema.parse({ ...scope, leadId, companyId })).toMatchObject({ leadId, companyId })
     expect(customerLeadLinkDealSchema.parse({ ...scope, leadId, dealId })).toMatchObject({ leadId, dealId })
+    expect(customerLeadUnlinkTargetSchema.parse({ ...scope, leadId })).toMatchObject({ leadId })
   })
 
   it('accepts create-from-lead overrides scoped to downstream target schemas', () => {

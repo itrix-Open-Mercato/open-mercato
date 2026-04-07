@@ -468,6 +468,10 @@ export const customerLeadLinkDealSchema = scopedSchema.extend({
   dealId: uuid(),
 })
 
+export const customerLeadUnlinkTargetSchema = scopedSchema.extend({
+  leadId: uuid(),
+})
+
 export const customerLeadCreatePersonSchema = scopedSchema.extend({
   leadId: uuid(),
   overrides: personCreateSchema.partial().optional(),
@@ -593,6 +597,7 @@ export type CustomerLeadDuplicateCheckInput = z.infer<typeof customerLeadDuplica
 export type CustomerLeadLinkPersonInput = z.infer<typeof customerLeadLinkPersonSchema>
 export type CustomerLeadLinkCompanyInput = z.infer<typeof customerLeadLinkCompanySchema>
 export type CustomerLeadLinkDealInput = z.infer<typeof customerLeadLinkDealSchema>
+export type CustomerLeadUnlinkTargetInput = z.infer<typeof customerLeadUnlinkTargetSchema>
 export type CustomerLeadCreatePersonInput = z.infer<typeof customerLeadCreatePersonSchema>
 export type CustomerLeadCreateCompanyInput = z.infer<typeof customerLeadCreateCompanySchema>
 export type CustomerLeadCreateDealInput = z.infer<typeof customerLeadCreateDealSchema>
