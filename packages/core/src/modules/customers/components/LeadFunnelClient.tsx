@@ -321,10 +321,12 @@ function targetOptionFromRecord(record: Record<string, unknown>, kind: TargetKin
   }
 }
 
-async function searchLeadTargets(kind: TargetKind, query: string): Promise<ComboboxOption[]> {
+async function searchLeadTargets(kind: TargetKind, query: string, filters: { companyId?: string | null; personId?: string | null } = {}): Promise<ComboboxOption[]> {
   const resource = kind === 'person' ? 'people' : kind === 'company' ? 'companies' : 'deals'
   const params = new URLSearchParams({ pageSize: '10', sortField: kind === 'deal' ? 'title' : 'name', sortDir: 'asc' })
   if (query.trim()) params.set('search', query.trim())
+  if ((kind === 'person' || kind === 'deal') && filters.companyId) params.set('companyEntityId', filters.companyId)
+  if (kind === 'deal' && filters.personId) params.set('personEntityId', filters.personId)
   const payload = await readApiResultOrThrow<ListResponse<Record<string, unknown>>>(`/api/customers/${resource}?${params.toString()}`)
   return (payload.items ?? [])
     .map((item) => targetOptionFromRecord(item, kind))
@@ -986,6 +988,14 @@ export function LeadDetailClient({ id }: { id: string }) {
       flash(t('customers.leads.detail.linkIdRequired', 'Target id is required.'), 'error')
       return
     }
+    if (kind === 'person' && !lead.linkedCompanyId) {
+      flash(t('customers.leads.detail.linkCompanyFirst', 'Link a company first, then choose a person from that company.'), 'error')
+      return
+    }
+    if (kind === 'deal' && (!lead.linkedCompanyId || !lead.linkedPersonId)) {
+      flash(t('customers.leads.detail.linkPersonFirst', 'Link a company and person first, then choose a deal assigned to them.'), 'error')
+      return
+    }
     await runLeadAction(
       `/api/customers/leads/link-${kind}`,
       { leadId: lead.id, [`${kind}Id`]: value },
@@ -1043,6 +1053,10 @@ export function LeadDetailClient({ id }: { id: string }) {
   const leadStages = config.stages.filter((stage) => stage.pipelineId === lead.pipelineId)
   const wonStages = leadStages.filter((stage) => stage.kind === 'won')
   const leadLostReasons = config.lostReasons.filter((reason) => !reason.pipelineId || reason.pipelineId === lead.pipelineId)
+  const linkedCompanyId = lead.linkedCompanyId ?? null
+  const linkedPersonId = lead.linkedPersonId ?? null
+  const canChoosePerson = Boolean(linkedCompanyId)
+  const canChooseDeal = Boolean(linkedCompanyId && linkedPersonId)
 
   return (
     <div className="space-y-6">
@@ -1095,31 +1109,18 @@ export function LeadDetailClient({ id }: { id: string }) {
         <div className="mt-4 grid gap-4 lg:grid-cols-3">
           <div className="space-y-3 rounded-md border p-3">
             <div className="flex items-center justify-between gap-2">
-              <div className="font-medium">{t('customers.leads.detail.personTarget', 'Person')}</div>
-              {lead.linkedPersonId ? <Badge variant="secondary">{t('customers.leads.detail.linkedBadge', 'Linked')}</Badge> : null}
-            </div>
-            {lead.linkedPersonId ? <Link className="text-sm underline" href={`/backend/customers/people/${lead.linkedPersonId}`}>{t('customers.leads.detail.openLinkedPerson', 'Open linked person')}</Link> : null}
-            <ComboboxInput
-              value={linkPersonId}
-              onChange={setLinkPersonId}
-              placeholder={t('customers.leads.detail.searchPerson', 'Search person by name, email, or phone...')}
-              loadSuggestions={(query) => searchLeadTargets('person', query ?? '')}
-              allowCustomValues={false}
-            />
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={() => void linkTarget('person')}>{t('customers.leads.detail.linkSelected', 'Link selected')}</Button>
-              <Button size="sm" asChild><Link href={`/backend/customers/people/create?leadId=${encodeURIComponent(lead.id)}`}>{t('customers.leads.detail.createInOm', 'Create in OM')}</Link></Button>
-            </div>
-          </div>
-          <div className="space-y-3 rounded-md border p-3">
-            <div className="flex items-center justify-between gap-2">
               <div className="font-medium">{t('customers.leads.detail.companyTarget', 'Company')}</div>
-              {lead.linkedCompanyId ? <Badge variant="secondary">{t('customers.leads.detail.linkedBadge', 'Linked')}</Badge> : null}
+              {lead.linkedCompanyId ? <Badge variant="secondary">{t('customers.leads.detail.linkedBadge', 'Linked')}</Badge> : <Badge variant="outline">{t('customers.leads.detail.stepOne', 'Step 1')}</Badge>}
             </div>
+            <p className="text-xs text-muted-foreground">{t('customers.leads.detail.companyFirstHint', 'Start by choosing the company account for this lead.')}</p>
             {lead.linkedCompanyId ? <Link className="text-sm underline" href={`/backend/customers/companies/${lead.linkedCompanyId}`}>{t('customers.leads.detail.openLinkedCompany', 'Open linked company')}</Link> : null}
             <ComboboxInput
               value={linkCompanyId}
-              onChange={setLinkCompanyId}
+              onChange={(value) => {
+                setLinkCompanyId(value)
+                setLinkPersonId('')
+                setLinkDealId('')
+              }}
               placeholder={t('customers.leads.detail.searchCompany', 'Search company by name, email, or phone...')}
               loadSuggestions={(query) => searchLeadTargets('company', query ?? '')}
               allowCustomValues={false}
@@ -1131,20 +1132,61 @@ export function LeadDetailClient({ id }: { id: string }) {
           </div>
           <div className="space-y-3 rounded-md border p-3">
             <div className="flex items-center justify-between gap-2">
-              <div className="font-medium">{t('customers.leads.detail.dealTarget', 'Deal')}</div>
-              {lead.linkedDealId ? <Badge variant="secondary">{t('customers.leads.detail.linkedBadge', 'Linked')}</Badge> : null}
+              <div className="font-medium">{t('customers.leads.detail.personTarget', 'Person')}</div>
+              {lead.linkedPersonId ? <Badge variant="secondary">{t('customers.leads.detail.linkedBadge', 'Linked')}</Badge> : <Badge variant="outline">{t('customers.leads.detail.stepTwo', 'Step 2')}</Badge>}
             </div>
+            <p className="text-xs text-muted-foreground">
+              {canChoosePerson
+                ? t('customers.leads.detail.personSecondHint', 'Suggestions are limited to people linked to the selected company.')
+                : t('customers.leads.detail.personBlockedHint', 'Choose and link a company first.')}
+            </p>
+            {lead.linkedPersonId ? <Link className="text-sm underline" href={`/backend/customers/people/${lead.linkedPersonId}`}>{t('customers.leads.detail.openLinkedPerson', 'Open linked person')}</Link> : null}
+            <ComboboxInput
+              value={linkPersonId}
+              onChange={(value) => {
+                setLinkPersonId(value)
+                setLinkDealId('')
+              }}
+              placeholder={canChoosePerson ? t('customers.leads.detail.searchPersonInCompany', 'Search person in this company...') : t('customers.leads.detail.searchPersonBlocked', 'Link a company first...')}
+              loadSuggestions={(query) => searchLeadTargets('person', query ?? '', { companyId: linkedCompanyId })}
+              disabled={!canChoosePerson}
+              allowCustomValues={false}
+            />
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={() => void linkTarget('person')} disabled={!canChoosePerson}>{t('customers.leads.detail.linkSelected', 'Link selected')}</Button>
+              {canChoosePerson ? (
+                <Button size="sm" asChild><Link href={`/backend/customers/people/create?leadId=${encodeURIComponent(lead.id)}&companyEntityId=${encodeURIComponent(linkedCompanyId!)}`}>{t('customers.leads.detail.createInOm', 'Create in OM')}</Link></Button>
+              ) : (
+                <Button size="sm" disabled>{t('customers.leads.detail.createInOm', 'Create in OM')}</Button>
+              )}
+            </div>
+          </div>
+          <div className="space-y-3 rounded-md border p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="font-medium">{t('customers.leads.detail.dealTarget', 'Deal')}</div>
+              {lead.linkedDealId ? <Badge variant="secondary">{t('customers.leads.detail.linkedBadge', 'Linked')}</Badge> : <Badge variant="outline">{t('customers.leads.detail.stepThree', 'Step 3')}</Badge>}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {canChooseDeal
+                ? t('customers.leads.detail.dealThirdHint', 'Suggestions are limited to deals assigned to the linked company and person.')
+                : t('customers.leads.detail.dealBlockedHint', 'Link a company and person first.')}
+            </p>
             {lead.linkedDealId ? <Link className="text-sm underline" href={`/backend/customers/deals/${lead.linkedDealId}`}>{t('customers.leads.detail.openLinkedDeal', 'Open linked deal')}</Link> : null}
             <ComboboxInput
               value={linkDealId}
               onChange={setLinkDealId}
-              placeholder={t('customers.leads.detail.searchDeal', 'Search deal by title or status...')}
-              loadSuggestions={(query) => searchLeadTargets('deal', query ?? '')}
+              placeholder={canChooseDeal ? t('customers.leads.detail.searchDealForTarget', 'Search deal for this company and person...') : t('customers.leads.detail.searchDealBlocked', 'Link a company and person first...')}
+              loadSuggestions={(query) => searchLeadTargets('deal', query ?? '', { companyId: linkedCompanyId, personId: linkedPersonId })}
+              disabled={!canChooseDeal}
               allowCustomValues={false}
             />
             <div className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={() => void linkTarget('deal')}>{t('customers.leads.detail.linkSelected', 'Link selected')}</Button>
-              <Button size="sm" asChild><Link href={`/backend/customers/deals/create?leadId=${encodeURIComponent(lead.id)}`}>{t('customers.leads.detail.createInOm', 'Create in OM')}</Link></Button>
+              <Button size="sm" variant="outline" onClick={() => void linkTarget('deal')} disabled={!canChooseDeal}>{t('customers.leads.detail.linkSelected', 'Link selected')}</Button>
+              {canChooseDeal ? (
+                <Button size="sm" asChild><Link href={`/backend/customers/deals/create?leadId=${encodeURIComponent(lead.id)}&companyEntityId=${encodeURIComponent(linkedCompanyId!)}&personEntityId=${encodeURIComponent(linkedPersonId!)}`}>{t('customers.leads.detail.createInOm', 'Create in OM')}</Link></Button>
+              ) : (
+                <Button size="sm" disabled>{t('customers.leads.detail.createInOm', 'Create in OM')}</Button>
+              )}
             </div>
           </div>
         </div>

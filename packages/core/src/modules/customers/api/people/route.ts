@@ -37,6 +37,7 @@ const listSchema = z
     sortField: z.string().optional(),
     sortDir: z.enum(['asc', 'desc']).optional(),
     id: z.string().uuid().optional(),
+    companyEntityId: z.string().uuid().optional(),
     tagIds: z.string().optional(),
     tagIdsEmpty: z.string().optional(),
   })
@@ -92,6 +93,7 @@ const crud = makeCrudRoute({
     buildFilters: async (query: any, ctx) => {
       const filters: Record<string, any> = { kind: { $eq: 'person' } }
       if (query.id) filters.id = { $eq: query.id }
+      if (query.companyEntityId) filters['lead_person_profile.company_entity_id'] = { $eq: query.companyEntityId }
       if (query.search) {
         filters.display_name = { $ilike: `%${escapeLikePattern(query.search)}%` }
       }
@@ -178,6 +180,13 @@ const crud = makeCrudRoute({
       {
         alias: 'tag_assignments',
         table: 'customer_tag_assignments',
+        from: { field: 'id' },
+        to: { field: 'entity_id' },
+        type: 'left',
+      },
+      {
+        alias: 'lead_person_profile',
+        table: 'customer_people',
         from: { field: 'id' },
         to: { field: 'entity_id' },
         type: 'left',

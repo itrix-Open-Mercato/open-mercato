@@ -620,6 +620,23 @@ const linkLeadPersonCommand: CommandHandler<CustomerLeadLinkPersonInput, void> =
       deletedAt: null,
     })
     if (!person) throw new CrudHttpError(404, { error: 'Person not found' })
+    if (!lead.linkedCompanyId) {
+      throw new CrudHttpError(400, { error: 'Link a company before linking a person' })
+    }
+    const profile = await em.findOne(CustomerPersonProfile, { entity: person }, { populate: ['company'] })
+    const profileCompany = profile?.company
+    const profileCompanyId =
+      typeof profileCompany === 'string'
+        ? profileCompany
+        : profileCompany && typeof profileCompany === 'object'
+          ? profileCompany.id
+          : null
+    if (profileCompanyId !== lead.linkedCompanyId) {
+      throw new CrudHttpError(400, { error: 'Person must belong to the linked company' })
+    }
+    if (lead.linkedPersonId !== person.id) {
+      lead.linkedDealId = null
+    }
     lead.linkedPersonId = person.id
     lead.updatedAt = new Date()
     await applySharedFieldWriteThrough(em, lead)
@@ -645,6 +662,10 @@ const linkLeadCompanyCommand: CommandHandler<CustomerLeadLinkCompanyInput, void>
       deletedAt: null,
     })
     if (!company) throw new CrudHttpError(404, { error: 'Company not found' })
+    if (lead.linkedCompanyId !== company.id) {
+      lead.linkedPersonId = null
+      lead.linkedDealId = null
+    }
     lead.linkedCompanyId = company.id
     lead.updatedAt = new Date()
     await applySharedFieldWriteThrough(em, lead)
@@ -669,6 +690,16 @@ const linkLeadDealCommand: CommandHandler<CustomerLeadLinkDealInput, void> = {
       deletedAt: null,
     })
     if (!deal) throw new CrudHttpError(404, { error: 'Deal not found' })
+    if (!lead.linkedCompanyId || !lead.linkedPersonId) {
+      throw new CrudHttpError(400, { error: 'Link a company and person before linking a deal' })
+    }
+    const [companyLink, personLink] = await Promise.all([
+      em.findOne(CustomerDealCompanyLink, { deal, company: { id: lead.linkedCompanyId } }),
+      em.findOne(CustomerDealPersonLink, { deal, person: { id: lead.linkedPersonId } }),
+    ])
+    if (!companyLink || !personLink) {
+      throw new CrudHttpError(400, { error: 'Deal must be assigned to the linked company and person' })
+    }
     lead.linkedDealId = deal.id
     lead.updatedAt = new Date()
     await applySharedFieldWriteThrough(em, lead)
