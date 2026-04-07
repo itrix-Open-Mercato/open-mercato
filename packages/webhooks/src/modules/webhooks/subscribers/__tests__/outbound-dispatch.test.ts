@@ -109,4 +109,30 @@ describe('webhooks outbound dispatch subscriber', () => {
 
     expect(findWithDecryption).toHaveBeenCalled()
   })
+
+  it('skips internal application lifecycle events without querying webhooks', async () => {
+    const em = {
+      fork: jest.fn(function fork() {
+        return em
+      }),
+    } as unknown as EntityManager
+
+    await handler(
+      {
+        requestId: 'req-1',
+        tenantId: 'tenant-1',
+        pathname: '/api/events/stream',
+      },
+      {
+        eventName: 'application.request.auth_resolved',
+        resolve: <T,>(name: string): T => {
+          if (name === 'em') return em as T
+          throw new Error(`Unexpected dependency: ${name}`)
+        },
+      },
+    )
+
+    expect(findWithDecryption).not.toHaveBeenCalled()
+    expect(em.fork).not.toHaveBeenCalled()
+  })
 })
