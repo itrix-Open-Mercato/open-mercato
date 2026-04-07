@@ -93,6 +93,7 @@ type LeadRow = {
   linkedPersonId?: string | null
   linkedCompanyId?: string | null
   linkedDealId?: string | null
+  convertedAt?: string | null
   createdAt?: string | null
   updatedAt?: string | null
 } & Record<string, unknown>
@@ -220,6 +221,7 @@ function mapLead(item: Record<string, unknown>): LeadRow | null {
     linkedPersonId: typeof item.linked_person_id === 'string' ? item.linked_person_id : null,
     linkedCompanyId: typeof item.linked_company_id === 'string' ? item.linked_company_id : null,
     linkedDealId: typeof item.linked_deal_id === 'string' ? item.linked_deal_id : null,
+    convertedAt: typeof item.converted_at === 'string' ? item.converted_at : null,
     createdAt: typeof item.created_at === 'string' ? item.created_at : null,
     updatedAt: typeof item.updated_at === 'string' ? item.updated_at : null,
   }, item)
@@ -722,6 +724,11 @@ export function LeadDetailClient({ id }: { id: string }) {
   const [linkPersonId, setLinkPersonId] = React.useState('')
   const [linkCompanyId, setLinkCompanyId] = React.useState('')
   const [linkDealId, setLinkDealId] = React.useState('')
+  const [convertCreatePerson, setConvertCreatePerson] = React.useState(false)
+  const [convertCreateCompany, setConvertCreateCompany] = React.useState(false)
+  const [convertCreateDeal, setConvertCreateDeal] = React.useState(false)
+  const [convertWonStageId, setConvertWonStageId] = React.useState('')
+  const [convertNote, setConvertNote] = React.useState('')
   const [reloadToken, setReloadToken] = React.useState(0)
 
   React.useEffect(() => {
@@ -744,6 +751,10 @@ export function LeadDetailClient({ id }: { id: string }) {
           setLinkPersonId(next.linkedPersonId ?? '')
           setLinkCompanyId(next.linkedCompanyId ?? '')
           setLinkDealId(next.linkedDealId ?? '')
+          setConvertCreatePerson(false)
+          setConvertCreateCompany(false)
+          setConvertCreateDeal(false)
+          setConvertNote('')
           const [nextConfig, nextHistory, nextDuplicates] = await Promise.all([
             loadLeadConfig(),
             loadLeadHistory(next.id),
@@ -830,6 +841,33 @@ export function LeadDetailClient({ id }: { id: string }) {
     )
   }
 
+  async function convertLead() {
+    if (!lead) return
+    const hasPerson = Boolean(lead.linkedPersonId || linkPersonId.trim() || convertCreatePerson)
+    const hasCompany = Boolean(lead.linkedCompanyId || linkCompanyId.trim() || convertCreateCompany)
+    const hasDeal = Boolean(lead.linkedDealId || linkDealId.trim() || convertCreateDeal)
+    if (!hasPerson && !hasCompany && !hasDeal) {
+      flash(t('customers.leads.detail.convertTargetRequired', 'Choose at least one conversion target.'), 'error')
+      return
+    }
+    await runLeadAction(
+      '/api/customers/leads/convert',
+      {
+        leadId: lead.id,
+        personId: linkPersonId.trim() || lead.linkedPersonId || null,
+        companyId: linkCompanyId.trim() || lead.linkedCompanyId || null,
+        dealId: linkDealId.trim() || lead.linkedDealId || null,
+        createPerson: convertCreatePerson,
+        createCompany: convertCreateCompany,
+        createDeal: convertCreateDeal,
+        wonStageId: convertWonStageId || null,
+        note: convertNote.trim() || null,
+      },
+      t('customers.leads.detail.converted', 'Lead converted.'),
+      t('customers.leads.detail.convertError', 'Failed to convert lead.'),
+    )
+  }
+
   async function assignOwner() {
     if (!lead) return
     const result = await apiCall('/api/customers/leads/assign', {
@@ -850,6 +888,7 @@ export function LeadDetailClient({ id }: { id: string }) {
   if (!lead) return <ErrorMessage label={t('customers.leads.detail.notFound', 'Lead not found.')} />
 
   const leadStages = config.stages.filter((stage) => stage.pipelineId === lead.pipelineId)
+  const wonStages = leadStages.filter((stage) => stage.kind === 'won')
   const leadLostReasons = config.lostReasons.filter((reason) => !reason.pipelineId || reason.pipelineId === lead.pipelineId)
 
   return (
@@ -936,6 +975,45 @@ export function LeadDetailClient({ id }: { id: string }) {
               <Button size="sm" variant="outline" onClick={() => void linkTarget('deal')}>{t('customers.leads.detail.link', 'Link')}</Button>
               <Button size="sm" onClick={() => void createTarget('deal')}>{t('customers.leads.detail.create', 'Create')}</Button>
             </div>
+          </div>
+        </div>
+        <div className="mt-6 rounded-md border bg-muted/20 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="font-semibold">{t('customers.leads.detail.conversionReview', 'Conversion review')}</h3>
+              <p className="text-sm text-muted-foreground">{t('customers.leads.detail.conversionReviewDescription', 'Confirm which CRM targets should be linked or created before closing this lead as won.')}</p>
+            </div>
+            {lead.convertedAt ? <Badge>{t('customers.leads.detail.convertedBadge', 'Converted')}</Badge> : null}
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={convertCreatePerson} disabled={Boolean(lead.linkedPersonId)} onChange={(event) => setConvertCreatePerson(event.target.checked)} />
+              {t('customers.leads.detail.createMissingPerson', 'Create missing person')}
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={convertCreateCompany} disabled={Boolean(lead.linkedCompanyId)} onChange={(event) => setConvertCreateCompany(event.target.checked)} />
+              {t('customers.leads.detail.createMissingCompany', 'Create missing company')}
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={convertCreateDeal} disabled={Boolean(lead.linkedDealId)} onChange={(event) => setConvertCreateDeal(event.target.checked)} />
+              {t('customers.leads.detail.createMissingDeal', 'Create missing deal')}
+            </label>
+            <div className="space-y-2 md:col-span-1">
+              <label className="text-sm font-medium">{t('customers.leads.detail.wonStage', 'Won stage')}</label>
+              <select className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={convertWonStageId} onChange={(event) => setConvertWonStageId(event.target.value)}>
+                <option value="">{t('customers.leads.detail.defaultWonStage', 'Default won stage')}</option>
+                {wonStages.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}
+              </select>
+            </div>
+            <div className="space-y-2 md:col-span-2">
+              <label className="text-sm font-medium">{t('customers.leads.detail.conversionNote', 'Conversion note')}</label>
+              <Input value={convertNote} onChange={(event) => setConvertNote(event.target.value)} placeholder={t('customers.leads.detail.conversionNotePlaceholder', 'Optional audit note')} />
+            </div>
+          </div>
+          <div className="mt-4 flex justify-end">
+            <Button onClick={() => void convertLead()} disabled={Boolean(lead.convertedAt)}>
+              {t('customers.leads.detail.convert', 'Convert lead')}
+            </Button>
           </div>
         </div>
       </section>

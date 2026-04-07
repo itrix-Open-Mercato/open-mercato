@@ -483,6 +483,18 @@ export const customerLeadCreateDealSchema = scopedSchema.extend({
   overrides: dealCreateSchema.partial().optional(),
 })
 
+export const customerLeadConvertSchema = scopedSchema.extend({
+  leadId: uuid(),
+  personId: uuid().nullable().optional(),
+  companyId: uuid().nullable().optional(),
+  dealId: uuid().nullable().optional(),
+  createPerson: z.boolean().optional(),
+  createCompany: z.boolean().optional(),
+  createDeal: z.boolean().optional(),
+  wonStageId: uuid().nullable().optional(),
+  note: z.string().trim().max(2000).nullable().optional(),
+})
+
 export const customerLeadPipelineCreateSchema = scopedSchema.extend({
   name: z.string().trim().min(1).max(200),
   code: codeSchema,
@@ -584,6 +596,7 @@ export type CustomerLeadLinkDealInput = z.infer<typeof customerLeadLinkDealSchem
 export type CustomerLeadCreatePersonInput = z.infer<typeof customerLeadCreatePersonSchema>
 export type CustomerLeadCreateCompanyInput = z.infer<typeof customerLeadCreateCompanySchema>
 export type CustomerLeadCreateDealInput = z.infer<typeof customerLeadCreateDealSchema>
+export type CustomerLeadConvertInput = z.infer<typeof customerLeadConvertSchema>
 export type CustomerLeadPipelineCreateInput = z.infer<typeof customerLeadPipelineCreateSchema>
 export type CustomerLeadPipelineUpdateInput = z.infer<typeof customerLeadPipelineUpdateSchema>
 export type CustomerLeadPipelineDeleteInput = z.infer<typeof customerLeadPipelineDeleteSchema>

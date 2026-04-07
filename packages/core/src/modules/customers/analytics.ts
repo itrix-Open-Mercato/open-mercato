@@ -40,6 +40,26 @@ export const analyticsConfig: AnalyticsModuleConfig = {
         customerEntityId: { table: 'customer_entities', idColumn: 'id', labelColumn: 'display_name' },
       },
     },
+    {
+      entityId: 'customers:customer_lead',
+      requiredFeatures: ['customers.leads.view'],
+      entityConfig: {
+        tableName: 'customer_leads',
+        dateField: 'created_at',
+        defaultScopeFields: ['tenant_id', 'organization_id'],
+      },
+      fieldMappings: {
+        id: { dbColumn: 'id', type: 'uuid' },
+        pipelineId: { dbColumn: 'pipeline_id', type: 'uuid' },
+        stageId: { dbColumn: 'stage_id', type: 'uuid' },
+        source: { dbColumn: 'source', type: 'text' },
+        ownerUserId: { dbColumn: 'owner_user_id', type: 'uuid' },
+        outcome: { dbColumn: 'outcome', type: 'text' },
+        lostReasonId: { dbColumn: 'lost_reason_id', type: 'uuid' },
+        convertedAt: { dbColumn: 'converted_at', type: 'timestamp' },
+        createdAt: { dbColumn: 'created_at', type: 'timestamp' },
+      },
+    },
   ],
 }
 

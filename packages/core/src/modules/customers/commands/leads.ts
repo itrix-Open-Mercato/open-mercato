@@ -14,6 +14,8 @@ import {
   CustomerPersonProfile,
   CustomerCompanyProfile,
   CustomerDeal,
+  CustomerDealPersonLink,
+  CustomerDealCompanyLink,
   type CustomerLeadOutcome,
 } from '../data/entities'
 import {
@@ -29,6 +31,7 @@ import {
   customerLeadCreatePersonSchema,
   customerLeadCreateCompanySchema,
   customerLeadCreateDealSchema,
+  customerLeadConvertSchema,
   type CustomerLeadCreateInput,
   type CustomerLeadUpdateInput,
   type CustomerLeadDeleteInput,
@@ -41,6 +44,7 @@ import {
   type CustomerLeadCreatePersonInput,
   type CustomerLeadCreateCompanyInput,
   type CustomerLeadCreateDealInput,
+  type CustomerLeadConvertInput,
 } from '../data/validators'
 import {
   ensureOrganizationScope,
@@ -786,6 +790,189 @@ const createLeadDealCommand: CommandHandler<CustomerLeadCreateDealInput, { dealI
   },
 }
 
+const convertLeadCommand: CommandHandler<CustomerLeadConvertInput, {
+  leadId: string
+  personId: string | null
+  companyId: string | null
+  dealId: string | null
+}> = {
+  id: 'customers.leads.convert',
+  async execute(rawInput, ctx) {
+    const parsed = customerLeadConvertSchema.parse(rawInput)
+    ensureTenantScope(ctx, parsed.tenantId)
+    ensureOrganizationScope(ctx, parsed.organizationId)
+    const em = (ctx.container.resolve('em') as EntityManager).fork()
+    const lead = await loadLeadForAction(em, parsed.leadId, parsed)
+    if (lead.convertedAt) throw new CrudHttpError(400, { error: 'Lead is already converted' })
+
+    const actorUserId = getActorUserId(ctx)
+    let personId = parsed.personId ?? lead.linkedPersonId ?? null
+    let companyId = parsed.companyId ?? lead.linkedCompanyId ?? null
+    let dealId = parsed.dealId ?? lead.linkedDealId ?? null
+
+    if (personId) {
+      const person = await em.findOne(CustomerEntity, {
+        id: personId,
+        kind: 'person',
+        tenantId: lead.tenantId,
+        organizationId: lead.organizationId,
+        deletedAt: null,
+      })
+      if (!person) throw new CrudHttpError(404, { error: 'Person not found' })
+    }
+    if (companyId) {
+      const company = await em.findOne(CustomerEntity, {
+        id: companyId,
+        kind: 'company',
+        tenantId: lead.tenantId,
+        organizationId: lead.organizationId,
+        deletedAt: null,
+      })
+      if (!company) throw new CrudHttpError(404, { error: 'Company not found' })
+    }
+    if (dealId) {
+      const deal = await em.findOne(CustomerDeal, {
+        id: dealId,
+        tenantId: lead.tenantId,
+        organizationId: lead.organizationId,
+        deletedAt: null,
+      })
+      if (!deal) throw new CrudHttpError(404, { error: 'Deal not found' })
+    }
+
+    if (parsed.createPerson && !personId) {
+      const names = splitDisplayName(lead.displayName)
+      const entity = em.create(CustomerEntity, {
+        id: randomUUID(),
+        tenantId: lead.tenantId,
+        organizationId: lead.organizationId,
+        kind: 'person',
+        displayName: lead.displayName,
+        ownerUserId: lead.ownerUserId ?? null,
+        primaryEmail: lead.primaryEmail ?? null,
+        primaryPhone: lead.primaryPhone ?? null,
+        source: lead.source ?? null,
+        isActive: true,
+      })
+      const profile = em.create(CustomerPersonProfile, {
+        id: randomUUID(),
+        tenantId: lead.tenantId,
+        organizationId: lead.organizationId,
+        entity,
+        firstName: names.firstName,
+        lastName: names.lastName,
+      })
+      em.persist(entity)
+      em.persist(profile)
+      lead.createdPersonId = entity.id
+      personId = entity.id
+    }
+    if (parsed.createCompany && !companyId) {
+      const entity = em.create(CustomerEntity, {
+        id: randomUUID(),
+        tenantId: lead.tenantId,
+        organizationId: lead.organizationId,
+        kind: 'company',
+        displayName: lead.displayName,
+        ownerUserId: lead.ownerUserId ?? null,
+        primaryEmail: lead.primaryEmail ?? null,
+        primaryPhone: lead.primaryPhone ?? null,
+        source: lead.source ?? null,
+        isActive: true,
+      })
+      const profile = em.create(CustomerCompanyProfile, {
+        id: randomUUID(),
+        tenantId: lead.tenantId,
+        organizationId: lead.organizationId,
+        entity,
+        legalName: lead.displayName,
+      })
+      em.persist(entity)
+      em.persist(profile)
+      lead.createdCompanyId = entity.id
+      companyId = entity.id
+    }
+    if (parsed.createDeal && !dealId) {
+      const deal = em.create(CustomerDeal, {
+        id: randomUUID(),
+        tenantId: lead.tenantId,
+        organizationId: lead.organizationId,
+        title: lead.displayName,
+        description: lead.qualificationNotes ?? null,
+        status: 'open',
+        ownerUserId: lead.ownerUserId ?? null,
+        source: lead.source ?? null,
+      })
+      em.persist(deal)
+      lead.createdDealId = deal.id
+      dealId = deal.id
+    }
+
+    if (!personId && !companyId && !dealId) {
+      throw new CrudHttpError(400, { error: 'Select at least one conversion target' })
+    }
+
+    if (dealId) {
+      const deal = await em.findOneOrFail(CustomerDeal, { id: dealId })
+      if (personId) {
+        const person = await em.findOneOrFail(CustomerEntity, { id: personId })
+        const existing = await em.findOne(CustomerDealPersonLink, { deal, person })
+        if (!existing) em.persist(em.create(CustomerDealPersonLink, { id: randomUUID(), deal, person }))
+      }
+      if (companyId) {
+        const company = await em.findOneOrFail(CustomerEntity, { id: companyId })
+        const existing = await em.findOne(CustomerDealCompanyLink, { deal, company })
+        if (!existing) em.persist(em.create(CustomerDealCompanyLink, { id: randomUUID(), deal, company }))
+      }
+    }
+
+    let wonStageId = parsed.wonStageId ?? null
+    if (wonStageId) {
+      const stage = await em.findOne(CustomerLeadPipelineStage, {
+        id: wonStageId,
+        tenantId: lead.tenantId,
+        organizationId: lead.organizationId,
+        pipelineId: lead.pipelineId,
+        kind: 'won',
+        isActive: true,
+      })
+      if (!stage) throw new CrudHttpError(400, { error: 'Won lead stage not found' })
+    } else {
+      const stage = await em.findOne(CustomerLeadPipelineStage, {
+        tenantId: lead.tenantId,
+        organizationId: lead.organizationId,
+        pipelineId: lead.pipelineId,
+        kind: 'won',
+        isActive: true,
+      }, { orderBy: { position: 'asc' } })
+      wonStageId = stage?.id ?? null
+    }
+
+    lead.linkedPersonId = personId
+    lead.linkedCompanyId = companyId
+    lead.linkedDealId = dealId
+    if (wonStageId) lead.stageId = wonStageId
+    lead.outcome = 'won'
+    lead.lostReasonId = null
+    lead.convertedAt = new Date()
+    lead.convertedByUserId = actorUserId
+    lead.updatedAt = new Date()
+    await applySharedFieldWriteThrough(em, lead)
+    addLeadHistory(em, lead, 'converted', actorUserId, {
+      personId,
+      companyId,
+      dealId,
+      createdPersonId: lead.createdPersonId ?? null,
+      createdCompanyId: lead.createdCompanyId ?? null,
+      createdDealId: lead.createdDealId ?? null,
+      wonStageId,
+    }, parsed.note ?? null)
+    await em.flush()
+    await emitLeadUpsert(ctx, lead)
+    return { leadId: lead.id, personId, companyId, dealId }
+  },
+}
+
 registerCommand(createLeadCommand)
 registerCommand(updateLeadCommand)
 registerCommand(deleteLeadCommand)
@@ -798,6 +985,7 @@ registerCommand(linkLeadDealCommand)
 registerCommand(createLeadPersonCommand)
 registerCommand(createLeadCompanyCommand)
 registerCommand(createLeadDealCommand)
+registerCommand(convertLeadCommand)
 
 export {
   createLeadCommand,
@@ -812,4 +1000,5 @@ export {
   createLeadPersonCommand,
   createLeadCompanyCommand,
   createLeadDealCommand,
+  convertLeadCommand,
 }
