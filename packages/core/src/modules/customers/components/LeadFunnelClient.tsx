@@ -251,7 +251,7 @@ function formatDate(value: string | null | undefined): string {
   if (!value) return '-'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return '-'
-  return date.toLocaleDateString()
+  return date.toLocaleString()
 }
 
 function outcomeBadge(outcome: LeadOutcome) {
@@ -328,6 +328,118 @@ async function searchLeadTargets(kind: TargetKind, query: string): Promise<Combo
   return (payload.items ?? [])
     .map((item) => targetOptionFromRecord(item, kind))
     .filter((item): item is ComboboxOption => item !== null)
+}
+
+function formatHistoryEventType(eventType: string): string {
+  return eventType
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function getHistoryEventTone(eventType: string): 'default' | 'secondary' | 'destructive' {
+  if (eventType === 'lost' || eventType === 'deleted') return 'destructive'
+  if (eventType === 'converted' || eventType === 'won') return 'default'
+  return 'secondary'
+}
+
+function formatHistoryValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return 'none'
+  if (value instanceof Date) return value.toISOString()
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return String(value)
+    }
+  }
+  return String(value)
+}
+
+function historyMetadataEntries(metadata: Record<string, unknown> | null | undefined): Array<{ key: string; value: string }> {
+  if (!metadata || typeof metadata !== 'object') return []
+  return Object.entries(metadata)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => ({ key, value: formatHistoryValue(value) }))
+}
+
+function targetHrefForHistoryKey(key: string, value: string): string | null {
+  if (!value || value === 'none') return null
+  if (key.toLowerCase().includes('personid')) return `/backend/customers/people/${value}`
+  if (key.toLowerCase().includes('companyid')) return `/backend/customers/companies/${value}`
+  if (key.toLowerCase().includes('dealid')) return `/backend/customers/deals/${value}`
+  return null
+}
+
+function LeadHistoryTimeline({
+  entries,
+  emptyLabel,
+}: {
+  entries: LeadHistoryEntry[]
+  emptyLabel: string
+}) {
+  const rowHeight = 156
+  const viewportHeight = 440
+  const overscan = 4
+  const [scrollTop, setScrollTop] = React.useState(0)
+  const startIndex = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan)
+  const endIndex = Math.min(entries.length, Math.ceil((scrollTop + viewportHeight) / rowHeight) + overscan)
+  const visibleEntries = entries.slice(startIndex, endIndex)
+
+  if (!entries.length) return <p className="text-sm text-muted-foreground">{emptyLabel}</p>
+
+  return (
+    <div
+      className="mt-4 overflow-auto rounded-md border bg-muted/10"
+      style={{ height: Math.min(viewportHeight, entries.length * rowHeight) }}
+      onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+    >
+      <div className="relative" style={{ height: entries.length * rowHeight }}>
+        {visibleEntries.map((entry, offset) => {
+          const index = startIndex + offset
+          const details = historyMetadataEntries(entry.metadata)
+          return (
+            <article
+              key={entry.id}
+              className="absolute left-0 right-0 border-b bg-card px-4 py-3 text-sm"
+              style={{ top: index * rowHeight, height: rowHeight }}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant={getHistoryEventTone(entry.eventType)}>{formatHistoryEventType(entry.eventType)}</Badge>
+                    <span className="text-xs text-muted-foreground">
+                      {formatDate(typeof entry.createdAt === 'string' ? entry.createdAt : entry.createdAt?.toISOString() ?? null)}
+                    </span>
+                  </div>
+                  {entry.actorUserId ? (
+                    <div className="mt-1 text-xs text-muted-foreground">Actor: {entry.actorUserId}</div>
+                  ) : null}
+                </div>
+                <div className="text-xs text-muted-foreground">#{index + 1}</div>
+              </div>
+              {entry.note ? <p className="mt-2 line-clamp-2 text-sm">{entry.note}</p> : null}
+              {details.length ? (
+                <dl className="mt-2 grid gap-1 sm:grid-cols-2">
+                  {details.slice(0, 8).map((detail) => {
+                    const href = targetHrefForHistoryKey(detail.key, detail.value)
+                    return (
+                      <div key={detail.key} className="min-w-0 rounded bg-muted/40 px-2 py-1">
+                        <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">{detail.key}</dt>
+                        <dd className="truncate font-mono text-xs">
+                          {href ? <Link className="underline" href={href}>{detail.value}</Link> : detail.value}
+                        </dd>
+                      </div>
+                    )
+                  })}
+                </dl>
+              ) : null}
+            </article>
+          )
+        })}
+      </div>
+    </div>
+  )
 }
 
 function makeFields(
@@ -1069,16 +1181,10 @@ export function LeadDetailClient({ id }: { id: string }) {
       <LeadFormClient mode="edit" leadId={id} initialValues={leadToFormValues(lead)} />
       <section className="rounded-lg border bg-card p-4">
         <h2 className="text-lg font-semibold">{t('customers.leads.detail.history', 'Lead history')}</h2>
-        <div className="mt-4 space-y-3">
-          {history.map((entry) => (
-            <div key={entry.id} className="rounded-md border p-3 text-sm">
-              <div className="font-medium">{entry.eventType}</div>
-              <div className="text-muted-foreground">{formatDate(typeof entry.createdAt === 'string' ? entry.createdAt : entry.createdAt?.toISOString() ?? null)}</div>
-              {entry.note ? <div className="mt-1">{entry.note}</div> : null}
-            </div>
-          ))}
-          {!history.length ? <p className="text-sm text-muted-foreground">{t('customers.leads.detail.noHistory', 'No history entries yet.')}</p> : null}
-        </div>
+        <LeadHistoryTimeline
+          entries={history}
+          emptyLabel={t('customers.leads.detail.noHistory', 'No history entries yet.')}
+        />
       </section>
     </div>
   )
