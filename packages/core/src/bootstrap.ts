@@ -3,6 +3,7 @@ import { asValue } from 'awilix'
 import { createEventBus } from '@open-mercato/events/index'
 import { setGlobalEventBus } from '@open-mercato/shared/modules/events'
 import { createCacheService } from '@open-mercato/cache'
+import type { CacheStrategy } from '@open-mercato/cache'
 import { createKmsService } from '@open-mercato/shared/lib/encryption/kms'
 import { TenantDataEncryptionService } from '@open-mercato/shared/lib/encryption/tenantDataEncryptionService'
 import { registerTenantEncryptionSubscriber } from '@open-mercato/shared/lib/encryption/subscriber'
@@ -20,6 +21,8 @@ import type { EntityManager } from '@mikro-orm/postgresql'
 // Use globalThis to survive tsx/webpack module duplication (same pattern as container.ts DI registrars)
 const RL_GLOBAL_KEY = '__openMercatoRateLimiterService__'
 const RL_SHUTDOWN_KEY = '__openMercatoRateLimiterShutdown__'
+const CACHE_GLOBAL_KEY = '__openMercatoCacheService__'
+const CACHE_SHUTDOWN_KEY = '__openMercatoCacheShutdown__'
 
 export function getCachedRateLimiterService(): RateLimiterService | null {
   let service = (globalThis as any)[RL_GLOBAL_KEY] as RateLimiterService | null ?? null
@@ -49,15 +52,30 @@ export function getCachedRateLimiterService(): RateLimiterService | null {
   return service
 }
 
+export function getCachedCacheService(): CacheStrategy {
+  let cache = (globalThis as any)[CACHE_GLOBAL_KEY] as CacheStrategy | null ?? null
+  if (!cache) {
+    try {
+      cache = createCacheService()
+    } catch (err: any) {
+      console.warn('Cache service initialization failed; falling back to memory strategy:', err?.message || err)
+      cache = createCacheService({ strategy: 'memory' })
+    }
+    ;(globalThis as any)[CACHE_GLOBAL_KEY] = cache
+
+    if (!(globalThis as any)[CACHE_SHUTDOWN_KEY]) {
+      const shutdown = () => { cache?.close?.().catch(() => {}) }
+      process.once('SIGTERM', shutdown)
+      process.once('SIGINT', shutdown)
+      ;(globalThis as any)[CACHE_SHUTDOWN_KEY] = true
+    }
+  }
+  return cache
+}
+
 export async function bootstrap(container: AwilixContainer) {
   // Create and register the cache service
-  let cache: any
-  try {
-    cache = createCacheService()
-  } catch (err: any) {
-    console.warn('Cache service initialization failed; falling back to memory strategy:', err?.message || err)
-    cache = createCacheService({ strategy: 'memory' })
-  }
+  const cache = getCachedCacheService()
   container.register({ cache: asValue(cache) })
 
   // Create and register the DI-aware event bus

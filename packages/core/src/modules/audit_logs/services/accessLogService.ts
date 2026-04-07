@@ -23,9 +23,12 @@ const CORE_RETENTION_DAYS = toPositiveNumber(process.env.AUDIT_LOGS_CORE_RETENTI
 const NON_CORE_RETENTION_HOURS = toPositiveNumber(process.env.AUDIT_LOGS_NON_CORE_RETENTION_HOURS, 8)
 const CORE_RETENTION_MS = CORE_RETENTION_DAYS * 24 * 60 * 60 * 1000
 const NON_CORE_RETENTION_MS = NON_CORE_RETENTION_HOURS * 60 * 60 * 1000
+const ROTATION_INTERVAL_MS = toPositiveNumber(process.env.AUDIT_LOGS_ROTATION_INTERVAL_MS, 60_000)
 
 let validationWarningLogged = false
 let runtimeValidationAvailable: boolean | null = null
+let lastRotationStartedAt = 0
+let rotationInFlight: Promise<void> | null = null
 
 const isZodRuntimeMissing = (err: unknown) => err instanceof TypeError && typeof err.message === 'string' && err.message.includes('_zod')
 
@@ -196,6 +199,17 @@ export class AccessLogService {
   }
 
   private async rotate(fork: EntityManager) {
+    const now = Date.now()
+    if (rotationInFlight) return
+    if (now - lastRotationStartedAt < ROTATION_INTERVAL_MS) return
+    lastRotationStartedAt = now
+    rotationInFlight = this.performRotate(fork).finally(() => {
+      rotationInFlight = null
+    })
+    await rotationInFlight
+  }
+
+  private async performRotate(fork: EntityManager) {
     const now = Date.now()
     const coreCutoff = new Date(now - CORE_RETENTION_MS)
     const nonCoreCutoff = new Date(now - NON_CORE_RETENTION_MS)
