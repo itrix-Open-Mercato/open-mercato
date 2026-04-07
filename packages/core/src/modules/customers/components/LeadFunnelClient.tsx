@@ -66,6 +66,7 @@ type LeadHistoryEntry = {
   actorUserId?: string | null
   note?: string | null
   metadata?: Record<string, unknown> | null
+  metadataLabels?: Record<string, string> | null
   createdAt?: string | Date | null
 }
 
@@ -356,11 +357,14 @@ function formatHistoryValue(value: unknown): string {
   return String(value)
 }
 
-function historyMetadataEntries(metadata: Record<string, unknown> | null | undefined): Array<{ key: string; value: string }> {
+function historyMetadataEntries(
+  metadata: Record<string, unknown> | null | undefined,
+  labels?: Record<string, string> | null,
+): Array<{ key: string; value: string; label?: string | null }> {
   if (!metadata || typeof metadata !== 'object') return []
   return Object.entries(metadata)
     .filter(([, value]) => value !== undefined)
-    .map(([key, value]) => ({ key, value: formatHistoryValue(value) }))
+    .map(([key, value]) => ({ key, value: formatHistoryValue(value), label: labels?.[key] ?? null }))
 }
 
 function targetHrefForHistoryKey(key: string, value: string): string | null {
@@ -397,7 +401,7 @@ function LeadHistoryTimeline({
       <div className="relative" style={{ height: entries.length * rowHeight }}>
         {visibleEntries.map((entry, offset) => {
           const index = startIndex + offset
-          const details = historyMetadataEntries(entry.metadata)
+          const details = historyMetadataEntries(entry.metadata, entry.metadataLabels)
           return (
             <article
               key={entry.id}
@@ -426,9 +430,10 @@ function LeadHistoryTimeline({
                     return (
                       <div key={detail.key} className="min-w-0 rounded bg-muted/40 px-2 py-1.5">
                         <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">{detail.key}</dt>
-                        <dd className="truncate font-mono text-xs">
-                          {href ? <Link className="underline" href={href}>{detail.value}</Link> : detail.value}
+                        <dd className="truncate text-xs">
+                          {href ? <Link className="font-medium underline" href={href}>{detail.label ?? detail.value}</Link> : detail.label ?? detail.value}
                         </dd>
+                        {detail.label ? <dd className="truncate font-mono text-[11px] text-muted-foreground">{detail.value}</dd> : null}
                       </div>
                     )
                   })}
