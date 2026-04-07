@@ -405,6 +405,72 @@ function targetHrefForHistoryKey(key: string, value: string): string | null {
   return null
 }
 
+function LeadHistoryTimelineRow({
+  entry,
+  index,
+  top,
+  onHeightChange,
+}: {
+  entry: LeadHistoryEntry
+  index: number
+  top: number
+  onHeightChange: (id: string, height: number) => void
+}) {
+  const rowRef = React.useRef<HTMLElement | null>(null)
+  const details = historyMetadataEntries(entry.metadata, entry.metadataLabels)
+
+  React.useLayoutEffect(() => {
+    const node = rowRef.current
+    if (!node) return
+    const measure = () => onHeightChange(entry.id, Math.ceil(node.getBoundingClientRect().height))
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [entry.id, onHeightChange])
+
+  return (
+    <article
+      ref={rowRef}
+      className="absolute left-0 right-0 border-b bg-card px-4 py-3 text-sm"
+      style={{ top }}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={getHistoryEventTone(entry.eventType)}>{formatHistoryEventType(entry.eventType)}</Badge>
+            <span className="text-xs text-muted-foreground">
+              {formatDate(typeof entry.createdAt === 'string' ? entry.createdAt : entry.createdAt?.toISOString() ?? null)}
+            </span>
+          </div>
+          {entry.actorUserId ? (
+            <div className="mt-1 text-xs text-muted-foreground">Actor: {entry.actorUserId}</div>
+          ) : null}
+        </div>
+        <div className="text-xs text-muted-foreground">#{index + 1}</div>
+      </div>
+      {entry.note ? <p className="mt-2 text-sm">{entry.note}</p> : null}
+      {details.length ? (
+        <dl className="mt-2 grid gap-1 md:grid-cols-2">
+          {details.map((detail) => {
+            const href = targetHrefForHistoryKey(detail.key, detail.value)
+            return (
+              <div key={detail.key} className="min-w-0 rounded bg-muted/40 px-2 py-1.5">
+                <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">{detail.key}</dt>
+                <dd className="break-words text-xs">
+                  {href ? <Link className="font-medium underline" href={href}>{detail.label ?? detail.value}</Link> : detail.label ?? detail.value}
+                </dd>
+                {detail.label ? <dd className="break-all font-mono text-[11px] text-muted-foreground">{detail.value}</dd> : null}
+              </div>
+            )
+          })}
+        </dl>
+      ) : null}
+    </article>
+  )
+}
+
 function LeadHistoryTimeline({
   entries,
   emptyLabel,
@@ -412,12 +478,52 @@ function LeadHistoryTimeline({
   entries: LeadHistoryEntry[]
   emptyLabel: string
 }) {
-  const rowHeight = 236
+  const estimatedRowHeight = 236
   const viewportHeight = 520
   const overscan = 4
   const [scrollTop, setScrollTop] = React.useState(0)
-  const startIndex = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan)
-  const endIndex = Math.min(entries.length, Math.ceil((scrollTop + viewportHeight) / rowHeight) + overscan)
+  const rowHeightsRef = React.useRef(new Map<string, number>())
+  const [measurementVersion, bumpMeasurementVersion] = React.useReducer((version: number) => version + 1, 0)
+
+  React.useEffect(() => {
+    const entryIds = new Set(entries.map((entry) => entry.id))
+    for (const id of rowHeightsRef.current.keys()) {
+      if (!entryIds.has(id)) rowHeightsRef.current.delete(id)
+    }
+    bumpMeasurementVersion()
+  }, [entries])
+
+  const handleHeightChange = React.useCallback((id: string, height: number) => {
+    if (!Number.isFinite(height) || height <= 0) return
+    const previous = rowHeightsRef.current.get(id)
+    if (previous !== undefined && Math.abs(previous - height) < 1) return
+    rowHeightsRef.current.set(id, height)
+    bumpMeasurementVersion()
+  }, [])
+
+  const { offsets, totalHeight } = React.useMemo(() => {
+    const nextOffsets: number[] = [0]
+    let total = 0
+    for (const entry of entries) {
+      total += rowHeightsRef.current.get(entry.id) ?? estimatedRowHeight
+      nextOffsets.push(total)
+    }
+    return { offsets: nextOffsets, totalHeight: total }
+  }, [entries, measurementVersion])
+
+  const findIndexAtOffset = React.useCallback((offset: number) => {
+    let low = 0
+    let high = entries.length
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2)
+      if ((offsets[mid + 1] ?? 0) < offset) low = mid + 1
+      else high = mid
+    }
+    return low
+  }, [entries.length, offsets])
+
+  const startIndex = Math.max(0, findIndexAtOffset(scrollTop) - overscan)
+  const endIndex = Math.min(entries.length, findIndexAtOffset(scrollTop + viewportHeight) + overscan + 1)
   const visibleEntries = entries.slice(startIndex, endIndex)
 
   if (!entries.length) return <p className="text-sm text-muted-foreground">{emptyLabel}</p>
@@ -425,56 +531,20 @@ function LeadHistoryTimeline({
   return (
     <div
       className="mt-4 overflow-auto rounded-md border bg-muted/10"
-      style={{ height: Math.min(viewportHeight, entries.length * rowHeight) }}
+      style={{ height: Math.min(viewportHeight, totalHeight) }}
       onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
     >
-      <div className="relative" style={{ height: entries.length * rowHeight }}>
+      <div className="relative" style={{ height: totalHeight }}>
         {visibleEntries.map((entry, offset) => {
           const index = startIndex + offset
-          const details = historyMetadataEntries(entry.metadata, entry.metadataLabels)
           return (
-            <article
+            <LeadHistoryTimelineRow
               key={entry.id}
-              className="absolute left-0 right-0 overflow-hidden border-b bg-card px-4 py-3 text-sm"
-              style={{ top: index * rowHeight, minHeight: rowHeight, height: rowHeight }}
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant={getHistoryEventTone(entry.eventType)}>{formatHistoryEventType(entry.eventType)}</Badge>
-                    <span className="text-xs text-muted-foreground">
-                      {formatDate(typeof entry.createdAt === 'string' ? entry.createdAt : entry.createdAt?.toISOString() ?? null)}
-                    </span>
-                  </div>
-                  {entry.actorUserId ? (
-                    <div className="mt-1 text-xs text-muted-foreground">Actor: {entry.actorUserId}</div>
-                  ) : null}
-                </div>
-                <div className="text-xs text-muted-foreground">#{index + 1}</div>
-              </div>
-              {entry.note ? <p className="mt-2 line-clamp-2 text-sm">{entry.note}</p> : null}
-              {details.length ? (
-                <dl className="mt-2 grid gap-1 md:grid-cols-2">
-                  {details.slice(0, 6).map((detail) => {
-                    const href = targetHrefForHistoryKey(detail.key, detail.value)
-                    return (
-                      <div key={detail.key} className="min-w-0 rounded bg-muted/40 px-2 py-1.5">
-                        <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">{detail.key}</dt>
-                        <dd className="truncate text-xs">
-                          {href ? <Link className="font-medium underline" href={href}>{detail.label ?? detail.value}</Link> : detail.label ?? detail.value}
-                        </dd>
-                        {detail.label ? <dd className="truncate font-mono text-[11px] text-muted-foreground">{detail.value}</dd> : null}
-                      </div>
-                    )
-                  })}
-                  {details.length > 6 ? (
-                    <div className="rounded bg-muted/40 px-2 py-1.5 text-xs text-muted-foreground">
-                      +{details.length - 6} more details
-                    </div>
-                  ) : null}
-                </dl>
-              ) : null}
-            </article>
+              entry={entry}
+              index={index}
+              top={offsets[index] ?? 0}
+              onHeightChange={handleHeightChange}
+            />
           )
         })}
       </div>
