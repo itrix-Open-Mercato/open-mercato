@@ -428,6 +428,31 @@ export const customerLeadDeleteSchema = scopedSchema.extend({
   id: uuid(),
 })
 
+export const customerLeadAssignSchema = scopedSchema.extend({
+  id: uuid(),
+  ownerUserId: uuid().nullable(),
+})
+
+export const customerLeadAdvanceStageSchema = scopedSchema.extend({
+  id: uuid(),
+  stageId: uuid(),
+  lostReasonId: uuid().nullable().optional(),
+  note: z.string().trim().max(2000).nullable().optional(),
+})
+
+export const customerLeadMarkLostSchema = scopedSchema.extend({
+  id: uuid(),
+  lostReasonId: uuid(),
+  note: z.string().trim().max(2000).nullable().optional(),
+})
+
+export const customerLeadDuplicateCheckSchema = scopedSchema.extend({
+  id: uuid().optional(),
+  primaryEmail: z.string().trim().email().max(320).nullable().optional(),
+  primaryPhone: z.string().trim().max(50).nullable().optional(),
+  vatId: z.string().trim().max(80).nullable().optional(),
+})
+
 export const customerLeadPipelineCreateSchema = scopedSchema.extend({
   name: z.string().trim().min(1).max(200),
   code: codeSchema,
@@ -519,6 +544,10 @@ export const customerLeadFieldBindingDeleteSchema = scopedSchema.extend({
 export type CustomerLeadCreateInput = z.infer<typeof customerLeadCreateSchema>
 export type CustomerLeadUpdateInput = z.infer<typeof customerLeadUpdateSchema>
 export type CustomerLeadDeleteInput = z.infer<typeof customerLeadDeleteSchema>
+export type CustomerLeadAssignInput = z.infer<typeof customerLeadAssignSchema>
+export type CustomerLeadAdvanceStageInput = z.infer<typeof customerLeadAdvanceStageSchema>
+export type CustomerLeadMarkLostInput = z.infer<typeof customerLeadMarkLostSchema>
+export type CustomerLeadDuplicateCheckInput = z.infer<typeof customerLeadDuplicateCheckSchema>
 export type CustomerLeadPipelineCreateInput = z.infer<typeof customerLeadPipelineCreateSchema>
 export type CustomerLeadPipelineUpdateInput = z.infer<typeof customerLeadPipelineUpdateSchema>
 export type CustomerLeadPipelineDeleteInput = z.infer<typeof customerLeadPipelineDeleteSchema>

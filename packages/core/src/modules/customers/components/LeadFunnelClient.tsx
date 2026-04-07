@@ -48,6 +48,25 @@ type LeadLostReason = {
   isActive: boolean
 }
 
+type LeadHistoryEntry = {
+  id: string
+  eventType: string
+  actorUserId?: string | null
+  note?: string | null
+  metadata?: Record<string, unknown> | null
+  createdAt?: string | Date | null
+}
+
+type DuplicateMatch = {
+  id: string
+  kind: 'person' | 'company'
+  displayName: string
+  primaryEmail?: string | null
+  primaryPhone?: string | null
+  vatId?: string | null
+  matchedFields: string[]
+}
+
 type LeadRow = {
   id: string
   displayName: string
@@ -208,6 +227,26 @@ async function loadLeadConfig() {
     stages: (stagesPayload.items ?? []).map(mapStage).filter((item): item is LeadStage => item !== null),
     lostReasons: (lostReasonsPayload.items ?? []).map(mapLostReason).filter((item): item is LeadLostReason => item !== null),
   }
+}
+
+async function loadLeadHistory(leadId: string): Promise<LeadHistoryEntry[]> {
+  const payload = await readApiResultOrThrow<ListResponse<LeadHistoryEntry>>(
+    `/api/customers/leads/history?leadId=${encodeURIComponent(leadId)}&pageSize=50`,
+  )
+  return payload.items ?? []
+}
+
+async function checkLeadDuplicates(lead: LeadRow): Promise<{ people: DuplicateMatch[]; companies: DuplicateMatch[]; total: number }> {
+  return readApiResultOrThrow('/api/customers/leads/duplicate-check', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      id: lead.id,
+      primaryEmail: lead.primaryEmail ?? null,
+      primaryPhone: lead.primaryPhone ?? null,
+      vatId: lead.vatId ?? null,
+    }),
+  })
 }
 
 function makeFields(
@@ -468,7 +507,12 @@ export function LeadListClient() {
         }}
         searchPlaceholder={t('customers.leads.list.search', 'Search leads...')}
         title={t('customers.leads.list.title', 'Leads')}
-        actions={<Button asChild><Link href="/backend/customers/leads/create">{t('customers.leads.list.create', 'Create lead')}</Link></Button>}
+        actions={(
+          <div className="flex gap-2">
+            <Button variant="outline" asChild><Link href="/backend/customers/leads/pipeline">{t('customers.leads.list.pipeline', 'Pipeline board')}</Link></Button>
+            <Button asChild><Link href="/backend/customers/leads/create">{t('customers.leads.list.create', 'Create lead')}</Link></Button>
+          </div>
+        )}
         pagination={{ page, pageSize, total, totalPages, onPageChange: setPage }}
         rowActions={(row) => (
           <RowActions
@@ -489,11 +533,155 @@ export function LeadListClient() {
   )
 }
 
+export function LeadBoardClient() {
+  const t = useT()
+  const router = useRouter()
+  const [pipelines, setPipelines] = React.useState<LeadPipeline[]>([])
+  const [stages, setStages] = React.useState<LeadStage[]>([])
+  const [lostReasons, setLostReasons] = React.useState<LeadLostReason[]>([])
+  const [selectedPipelineId, setSelectedPipelineId] = React.useState<string>('')
+  const [rows, setRows] = React.useState<LeadRow[]>([])
+  const [isLoading, setIsLoading] = React.useState(true)
+  const [reloadToken, setReloadToken] = React.useState(0)
+
+  React.useEffect(() => {
+    let cancelled = false
+    loadLeadConfig()
+      .then((config) => {
+        if (cancelled) return
+        setPipelines(config.pipelines)
+        setStages(config.stages)
+        setLostReasons(config.lostReasons)
+        setSelectedPipelineId((current) => current || config.pipelines.find((pipeline) => pipeline.isDefault)?.id || config.pipelines[0]?.id || '')
+      })
+      .catch(() => flash(t('customers.leads.pipeline.configError', 'Failed to load lead pipeline configuration.'), 'error'))
+    return () => {
+      cancelled = true
+    }
+  }, [t])
+
+  React.useEffect(() => {
+    let cancelled = false
+    async function load() {
+      if (!selectedPipelineId) {
+        setRows([])
+        setIsLoading(false)
+        return
+      }
+      setIsLoading(true)
+      try {
+        const payload = await readApiResultOrThrow<ListResponse<Record<string, unknown>>>(
+          `/api/customers/leads?pipelineId=${encodeURIComponent(selectedPipelineId)}&pageSize=100&sortField=createdAt&sortDir=desc`,
+        )
+        if (!cancelled) {
+          setRows((payload.items ?? []).map(mapLead).filter((row): row is LeadRow => row !== null))
+        }
+      } catch {
+        if (!cancelled) flash(t('customers.leads.pipeline.loadError', 'Failed to load lead board.'), 'error')
+      } finally {
+        if (!cancelled) setIsLoading(false)
+      }
+    }
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedPipelineId, reloadToken, t])
+
+  async function moveLead(lead: LeadRow, stage: LeadStage) {
+    const body: Record<string, unknown> = { id: lead.id, stageId: stage.id }
+    if (stage.kind === 'lost') {
+      const reason = lostReasons.find((item) => !item.pipelineId || item.pipelineId === lead.pipelineId)
+      if (!reason) {
+        flash(t('customers.leads.pipeline.missingLostReason', 'Configure a lost reason before moving a lead to a lost stage.'), 'error')
+        return
+      }
+      body.lostReasonId = reason.id
+    }
+    const result = await apiCall('/api/customers/leads/advance-stage', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!result.ok) {
+      flash(t('customers.leads.pipeline.moveError', 'Failed to move lead.'), 'error')
+      return
+    }
+    flash(t('customers.leads.pipeline.moved', 'Lead moved.'), 'success')
+    setReloadToken((value) => value + 1)
+  }
+
+  const visibleStages = React.useMemo(
+    () => stages.filter((stage) => stage.pipelineId === selectedPipelineId).sort((a, b) => a.position - b.position),
+    [selectedPipelineId, stages],
+  )
+
+  if (isLoading && !rows.length) return <LoadingMessage label={t('customers.leads.pipeline.loading', 'Loading lead pipeline...')} />
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold">{t('customers.leads.pipeline.title', 'Lead pipeline')}</h1>
+          <p className="text-sm text-muted-foreground">{t('customers.leads.pipeline.description', 'Move leads between qualification stages.')}</p>
+        </div>
+        <select
+          className="h-9 rounded-md border bg-background px-3 text-sm"
+          value={selectedPipelineId}
+          onChange={(event) => setSelectedPipelineId(event.target.value)}
+        >
+          {pipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
+        </select>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {visibleStages.map((stage) => {
+          const stageRows = rows.filter((row) => row.stageId === stage.id)
+          return (
+            <section key={stage.id} className="min-h-80 rounded-lg border bg-muted/20 p-3">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <div className="font-medium">{stage.name}</div>
+                <Badge variant={stage.kind === 'lost' ? 'destructive' : stage.kind === 'won' ? 'default' : 'secondary'}>{stageRows.length}</Badge>
+              </div>
+              <div className="space-y-2">
+                {stageRows.map((lead) => (
+                  <article key={lead.id} className="rounded-md border bg-background p-3 shadow-sm">
+                    <button className="text-left font-medium hover:underline" onClick={() => router.push(`/backend/customers/leads/${lead.id}`)}>
+                      {lead.displayName}
+                    </button>
+                    <div className="mt-1 text-xs text-muted-foreground">{lead.primaryEmail || lead.primaryPhone || lead.source || '-'}</div>
+                    <div className="mt-3 flex flex-wrap gap-1">
+                      {visibleStages
+                        .filter((candidate) => candidate.id !== stage.id)
+                        .map((candidate) => (
+                          <Button key={candidate.id} size="sm" variant="outline" onClick={() => void moveLead(lead, candidate)}>
+                            {candidate.name}
+                          </Button>
+                        ))}
+                    </div>
+                  </article>
+                ))}
+                {!stageRows.length ? <p className="text-sm text-muted-foreground">{t('customers.leads.pipeline.emptyStage', 'No leads in this stage.')}</p> : null}
+              </div>
+            </section>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export function LeadDetailClient({ id }: { id: string }) {
   const t = useT()
   const [lead, setLead] = React.useState<LeadRow | null>(null)
+  const [config, setConfig] = React.useState<{ stages: LeadStage[]; lostReasons: LeadLostReason[] }>({ stages: [], lostReasons: [] })
+  const [history, setHistory] = React.useState<LeadHistoryEntry[]>([])
+  const [duplicates, setDuplicates] = React.useState<{ people: DuplicateMatch[]; companies: DuplicateMatch[]; total: number } | null>(null)
   const [isLoading, setIsLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
+  const [selectedStageId, setSelectedStageId] = React.useState('')
+  const [selectedLostReasonId, setSelectedLostReasonId] = React.useState('')
+  const [ownerUserId, setOwnerUserId] = React.useState('')
+  const [reloadToken, setReloadToken] = React.useState(0)
 
   React.useEffect(() => {
     let cancelled = false
@@ -509,6 +697,20 @@ export function LeadDetailClient({ id }: { id: string }) {
         const next = (payload.items ?? []).map(mapLead).find((item) => item?.id === id) ?? null
         if (!next) setError(t('customers.leads.detail.notFound', 'Lead not found.'))
         setLead(next)
+        if (next) {
+          setSelectedStageId(next.stageId)
+          setOwnerUserId(next.ownerUserId ?? '')
+          const [nextConfig, nextHistory, nextDuplicates] = await Promise.all([
+            loadLeadConfig(),
+            loadLeadHistory(next.id),
+            checkLeadDuplicates(next).catch(() => ({ people: [], companies: [], total: 0 })),
+          ])
+          if (!cancelled) {
+            setConfig({ stages: nextConfig.stages, lostReasons: nextConfig.lostReasons })
+            setHistory(nextHistory)
+            setDuplicates(nextDuplicates)
+          }
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : t('customers.leads.detail.loadError', 'Failed to load lead.'))
       } finally {
@@ -519,13 +721,113 @@ export function LeadDetailClient({ id }: { id: string }) {
     return () => {
       cancelled = true
     }
-  }, [id, t])
+  }, [id, reloadToken, t])
+
+  async function advanceStage() {
+    if (!lead || !selectedStageId) return
+    const stage = config.stages.find((item) => item.id === selectedStageId)
+    const body: Record<string, unknown> = { id: lead.id, stageId: selectedStageId }
+    if (stage?.kind === 'lost') {
+      if (!selectedLostReasonId) {
+        flash(t('customers.leads.detail.lostReasonRequired', 'Lost reason is required.'), 'error')
+        return
+      }
+      body.lostReasonId = selectedLostReasonId
+    }
+    const result = await apiCall('/api/customers/leads/advance-stage', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!result.ok) {
+      flash(t('customers.leads.detail.advanceError', 'Failed to advance lead stage.'), 'error')
+      return
+    }
+    flash(t('customers.leads.detail.stageAdvanced', 'Lead stage updated.'), 'success')
+    setReloadToken((value) => value + 1)
+  }
+
+  async function assignOwner() {
+    if (!lead) return
+    const result = await apiCall('/api/customers/leads/assign', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: lead.id, ownerUserId: ownerUserId.trim() || null }),
+    })
+    if (!result.ok) {
+      flash(t('customers.leads.detail.assignError', 'Failed to assign lead.'), 'error')
+      return
+    }
+    flash(t('customers.leads.detail.assigned', 'Lead owner updated.'), 'success')
+    setReloadToken((value) => value + 1)
+  }
 
   if (isLoading) return <LoadingMessage label={t('customers.leads.detail.loading', 'Loading lead...')} />
   if (error) return <ErrorMessage label={error} />
   if (!lead) return <ErrorMessage label={t('customers.leads.detail.notFound', 'Lead not found.')} />
 
-  return <LeadFormClient mode="edit" leadId={id} initialValues={leadToFormValues(lead)} />
+  const leadStages = config.stages.filter((stage) => stage.pipelineId === lead.pipelineId)
+  const leadLostReasons = config.lostReasons.filter((reason) => !reason.pipelineId || reason.pipelineId === lead.pipelineId)
+
+  return (
+    <div className="space-y-6">
+      {duplicates && duplicates.total > 0 ? (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+          <div className="font-medium">{t('customers.leads.detail.duplicatesTitle', 'Potential duplicates found')}</div>
+          <div className="mt-2 space-y-1">
+            {[...duplicates.people, ...duplicates.companies].map((match) => (
+              <div key={match.id}>
+                {match.kind}: <Link className="underline" href={`/backend/customers/${match.kind === 'person' ? 'people' : 'companies'}/${match.id}`}>{match.displayName}</Link>
+                {' '}({match.matchedFields.join(', ')})
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      <section className="rounded-lg border bg-card p-4">
+        <h2 className="text-lg font-semibold">{t('customers.leads.detail.workflow', 'Qualification workflow')}</h2>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">{t('customers.leads.detail.stage', 'Stage')}</label>
+            <select className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={selectedStageId} onChange={(event) => setSelectedStageId(event.target.value)}>
+              {leadStages.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}
+            </select>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">{t('customers.leads.detail.lostReason', 'Lost reason')}</label>
+            <select className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={selectedLostReasonId} onChange={(event) => setSelectedLostReasonId(event.target.value)}>
+              <option value="">{t('common.none', 'None')}</option>
+              {leadLostReasons.map((reason) => <option key={reason.id} value={reason.id}>{reason.name}</option>)}
+            </select>
+          </div>
+          <div className="flex items-end">
+            <Button onClick={() => void advanceStage()}>{t('customers.leads.detail.advanceStage', 'Update stage')}</Button>
+          </div>
+          <div className="space-y-2 md:col-span-2">
+            <label className="text-sm font-medium">{t('customers.leads.detail.ownerUserId', 'Owner user ID')}</label>
+            <Input value={ownerUserId} onChange={(event) => setOwnerUserId(event.target.value)} placeholder="00000000-0000-0000-0000-000000000000" />
+          </div>
+          <div className="flex items-end">
+            <Button variant="outline" onClick={() => void assignOwner()}>{t('customers.leads.detail.assign', 'Assign')}</Button>
+          </div>
+        </div>
+      </section>
+      <LeadFormClient mode="edit" leadId={id} initialValues={leadToFormValues(lead)} />
+      <section className="rounded-lg border bg-card p-4">
+        <h2 className="text-lg font-semibold">{t('customers.leads.detail.history', 'Lead history')}</h2>
+        <div className="mt-4 space-y-3">
+          {history.map((entry) => (
+            <div key={entry.id} className="rounded-md border p-3 text-sm">
+              <div className="font-medium">{entry.eventType}</div>
+              <div className="text-muted-foreground">{formatDate(typeof entry.createdAt === 'string' ? entry.createdAt : entry.createdAt?.toISOString() ?? null)}</div>
+              {entry.note ? <div className="mt-1">{entry.note}</div> : null}
+            </div>
+          ))}
+          {!history.length ? <p className="text-sm text-muted-foreground">{t('customers.leads.detail.noHistory', 'No history entries yet.')}</p> : null}
+        </div>
+      </section>
+    </div>
+  )
 }
 
 export function LeadConfigClient() {

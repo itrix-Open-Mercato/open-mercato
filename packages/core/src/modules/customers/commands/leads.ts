@@ -15,9 +15,15 @@ import {
   customerLeadCreateSchema,
   customerLeadUpdateSchema,
   customerLeadDeleteSchema,
+  customerLeadAssignSchema,
+  customerLeadAdvanceStageSchema,
+  customerLeadMarkLostSchema,
   type CustomerLeadCreateInput,
   type CustomerLeadUpdateInput,
   type CustomerLeadDeleteInput,
+  type CustomerLeadAssignInput,
+  type CustomerLeadAdvanceStageInput,
+  type CustomerLeadMarkLostInput,
 } from '../data/validators'
 import {
   ensureOrganizationScope,
@@ -154,7 +160,8 @@ function addLeadHistory(
   lead: CustomerLead,
   eventType: string,
   actorUserId: string | null,
-  metadata?: Record<string, unknown> | null
+  metadata?: Record<string, unknown> | null,
+  note?: string | null
 ): void {
   em.persist(em.create(CustomerLeadHistory, {
     tenantId: lead.tenantId,
@@ -162,6 +169,7 @@ function addLeadHistory(
     leadId: lead.id,
     eventType,
     actorUserId,
+    note: note ?? null,
     metadata: metadata ?? null,
   }))
 }
@@ -312,8 +320,164 @@ const deleteLeadCommand: CommandHandler<CustomerLeadDeleteInput, void> = {
   },
 }
 
+const assignLeadCommand: CommandHandler<CustomerLeadAssignInput, void> = {
+  id: 'customers.leads.assign',
+  async execute(rawInput, ctx) {
+    const parsed = customerLeadAssignSchema.parse(rawInput)
+    ensureTenantScope(ctx, parsed.tenantId)
+    ensureOrganizationScope(ctx, parsed.organizationId)
+
+    const em = (ctx.container.resolve('em') as EntityManager).fork()
+    const lead = await em.findOne(CustomerLead, {
+      id: parsed.id,
+      tenantId: parsed.tenantId,
+      organizationId: parsed.organizationId,
+      deletedAt: null,
+    })
+    if (!lead) throw new CrudHttpError(404, { error: 'Lead not found' })
+
+    const previousOwnerUserId = lead.ownerUserId ?? null
+    lead.ownerUserId = parsed.ownerUserId ?? null
+    lead.updatedAt = new Date()
+    addLeadHistory(em, lead, 'assigned', getActorUserId(ctx), {
+      fromOwnerUserId: previousOwnerUserId,
+      toOwnerUserId: lead.ownerUserId ?? null,
+    })
+    await em.flush()
+    await emitQueryIndexUpsertEvents(ctx, [{
+      entityType: CUSTOMER_LEAD_ENTITY_ID,
+      recordId: lead.id,
+      tenantId: lead.tenantId,
+      organizationId: lead.organizationId,
+    }])
+  },
+}
+
+const advanceLeadStageCommand: CommandHandler<CustomerLeadAdvanceStageInput, void> = {
+  id: 'customers.leads.advance-stage',
+  async execute(rawInput, ctx) {
+    const parsed = customerLeadAdvanceStageSchema.parse(rawInput)
+    ensureTenantScope(ctx, parsed.tenantId)
+    ensureOrganizationScope(ctx, parsed.organizationId)
+
+    const em = (ctx.container.resolve('em') as EntityManager).fork()
+    const lead = await em.findOne(CustomerLead, {
+      id: parsed.id,
+      tenantId: parsed.tenantId,
+      organizationId: parsed.organizationId,
+      deletedAt: null,
+    })
+    if (!lead) throw new CrudHttpError(404, { error: 'Lead not found' })
+
+    const stage = await em.findOne(CustomerLeadPipelineStage, {
+      id: parsed.stageId,
+      tenantId: lead.tenantId,
+      organizationId: lead.organizationId,
+      pipelineId: lead.pipelineId,
+      isActive: true,
+    })
+    if (!stage) throw new CrudHttpError(400, { error: 'Lead pipeline stage not found' })
+    if (stage.kind === 'lost' && !parsed.lostReasonId) {
+      throw new CrudHttpError(400, { error: 'Lost reason is required for lost stage' })
+    }
+    await assertLostReasonInScope(em, {
+      tenantId: lead.tenantId,
+      organizationId: lead.organizationId,
+    }, parsed.lostReasonId ?? null, lead.pipelineId)
+
+    const previousStageId = lead.stageId
+    const previousOutcome = lead.outcome
+    const previousLostReasonId = lead.lostReasonId ?? null
+    lead.stageId = stage.id
+    lead.outcome = stage.kind
+    lead.lostReasonId = stage.kind === 'lost' ? parsed.lostReasonId ?? null : null
+    lead.updatedAt = new Date()
+
+    addLeadHistory(em, lead, 'stage_changed', getActorUserId(ctx), {
+      fromStageId: previousStageId,
+      toStageId: stage.id,
+      fromOutcome: previousOutcome,
+      toOutcome: lead.outcome,
+      fromLostReasonId: previousLostReasonId,
+      toLostReasonId: lead.lostReasonId ?? null,
+    }, parsed.note ?? null)
+
+    await em.flush()
+    await emitQueryIndexUpsertEvents(ctx, [{
+      entityType: CUSTOMER_LEAD_ENTITY_ID,
+      recordId: lead.id,
+      tenantId: lead.tenantId,
+      organizationId: lead.organizationId,
+    }])
+  },
+}
+
+const markLeadLostCommand: CommandHandler<CustomerLeadMarkLostInput, void> = {
+  id: 'customers.leads.mark-lost',
+  async execute(rawInput, ctx) {
+    const parsed = customerLeadMarkLostSchema.parse(rawInput)
+    ensureTenantScope(ctx, parsed.tenantId)
+    ensureOrganizationScope(ctx, parsed.organizationId)
+
+    const em = (ctx.container.resolve('em') as EntityManager).fork()
+    const lead = await em.findOne(CustomerLead, {
+      id: parsed.id,
+      tenantId: parsed.tenantId,
+      organizationId: parsed.organizationId,
+      deletedAt: null,
+    })
+    if (!lead) throw new CrudHttpError(404, { error: 'Lead not found' })
+    await assertLostReasonInScope(em, {
+      tenantId: lead.tenantId,
+      organizationId: lead.organizationId,
+    }, parsed.lostReasonId, lead.pipelineId)
+
+    const lostStage = await em.findOne(CustomerLeadPipelineStage, {
+      tenantId: lead.tenantId,
+      organizationId: lead.organizationId,
+      pipelineId: lead.pipelineId,
+      kind: 'lost',
+      isActive: true,
+    }, { orderBy: { position: 'asc' } })
+
+    const previousStageId = lead.stageId
+    const previousOutcome = lead.outcome
+    const previousLostReasonId = lead.lostReasonId ?? null
+    if (lostStage) lead.stageId = lostStage.id
+    lead.outcome = 'lost'
+    lead.lostReasonId = parsed.lostReasonId
+    lead.updatedAt = new Date()
+    addLeadHistory(em, lead, 'lost', getActorUserId(ctx), {
+      fromStageId: previousStageId,
+      toStageId: lead.stageId,
+      fromOutcome: previousOutcome,
+      toOutcome: 'lost',
+      fromLostReasonId: previousLostReasonId,
+      toLostReasonId: parsed.lostReasonId,
+    }, parsed.note ?? null)
+
+    await em.flush()
+    await emitQueryIndexUpsertEvents(ctx, [{
+      entityType: CUSTOMER_LEAD_ENTITY_ID,
+      recordId: lead.id,
+      tenantId: lead.tenantId,
+      organizationId: lead.organizationId,
+    }])
+  },
+}
+
 registerCommand(createLeadCommand)
 registerCommand(updateLeadCommand)
 registerCommand(deleteLeadCommand)
+registerCommand(assignLeadCommand)
+registerCommand(advanceLeadStageCommand)
+registerCommand(markLeadLostCommand)
 
-export { createLeadCommand, updateLeadCommand, deleteLeadCommand }
+export {
+  createLeadCommand,
+  updateLeadCommand,
+  deleteLeadCommand,
+  assignLeadCommand,
+  advanceLeadStageCommand,
+  markLeadLostCommand,
+}
