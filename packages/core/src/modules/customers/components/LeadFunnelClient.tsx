@@ -378,8 +378,8 @@ function LeadHistoryTimeline({
   entries: LeadHistoryEntry[]
   emptyLabel: string
 }) {
-  const rowHeight = 156
-  const viewportHeight = 440
+  const rowHeight = 236
+  const viewportHeight = 520
   const overscan = 4
   const [scrollTop, setScrollTop] = React.useState(0)
   const startIndex = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan)
@@ -401,8 +401,8 @@ function LeadHistoryTimeline({
           return (
             <article
               key={entry.id}
-              className="absolute left-0 right-0 border-b bg-card px-4 py-3 text-sm"
-              style={{ top: index * rowHeight, height: rowHeight }}
+              className="absolute left-0 right-0 overflow-hidden border-b bg-card px-4 py-3 text-sm"
+              style={{ top: index * rowHeight, minHeight: rowHeight, height: rowHeight }}
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -420,11 +420,11 @@ function LeadHistoryTimeline({
               </div>
               {entry.note ? <p className="mt-2 line-clamp-2 text-sm">{entry.note}</p> : null}
               {details.length ? (
-                <dl className="mt-2 grid gap-1 sm:grid-cols-2">
-                  {details.slice(0, 8).map((detail) => {
+                <dl className="mt-2 grid gap-1 md:grid-cols-2">
+                  {details.slice(0, 6).map((detail) => {
                     const href = targetHrefForHistoryKey(detail.key, detail.value)
                     return (
-                      <div key={detail.key} className="min-w-0 rounded bg-muted/40 px-2 py-1">
+                      <div key={detail.key} className="min-w-0 rounded bg-muted/40 px-2 py-1.5">
                         <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">{detail.key}</dt>
                         <dd className="truncate font-mono text-xs">
                           {href ? <Link className="underline" href={href}>{detail.value}</Link> : detail.value}
@@ -432,6 +432,11 @@ function LeadHistoryTimeline({
                       </div>
                     )
                   })}
+                  {details.length > 6 ? (
+                    <div className="rounded bg-muted/40 px-2 py-1.5 text-xs text-muted-foreground">
+                      +{details.length - 6} more details
+                    </div>
+                  ) : null}
                 </dl>
               ) : null}
             </article>
