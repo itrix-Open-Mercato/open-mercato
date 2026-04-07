@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { CrudForm, type CrudField } from '@open-mercato/ui/backend/CrudForm'
 import { DataTable, withDataTableNamespaces } from '@open-mercato/ui/backend/DataTable'
 import { ErrorMessage, LoadingMessage } from '@open-mercato/ui/backend/detail'
+import { ComboboxInput, type ComboboxOption } from '@open-mercato/ui/backend/inputs'
 import { RowActions } from '@open-mercato/ui/backend/RowActions'
 import { flash } from '@open-mercato/ui/backend/FlashMessages'
 import { useConfirmDialog } from '@open-mercato/ui/backend/confirm-dialog'
@@ -121,6 +122,8 @@ type ListResponse<T> = {
   total?: number
   totalPages?: number
 }
+
+type TargetKind = 'person' | 'company' | 'deal'
 
 const leadFormSchema = z.object({
   id: z.string().uuid().optional(),
@@ -287,6 +290,44 @@ async function checkLeadDuplicates(lead: LeadRow): Promise<{ people: DuplicateMa
       vatId: lead.vatId ?? null,
     }),
   })
+}
+
+function targetOptionFromRecord(record: Record<string, unknown>, kind: TargetKind): ComboboxOption | null {
+  const id = typeof record.id === 'string' ? record.id : null
+  if (!id) return null
+  const primaryLabel =
+    typeof record.display_name === 'string' && record.display_name.trim()
+      ? record.display_name.trim()
+      : typeof record.displayName === 'string' && record.displayName.trim()
+        ? record.displayName.trim()
+        : typeof record.title === 'string' && record.title.trim()
+          ? record.title.trim()
+          : id
+  const secondary =
+    typeof record.primary_email === 'string' && record.primary_email.trim()
+      ? record.primary_email.trim()
+      : typeof record.primaryEmail === 'string' && record.primaryEmail.trim()
+        ? record.primaryEmail.trim()
+        : typeof record.primary_phone === 'string' && record.primary_phone.trim()
+          ? record.primary_phone.trim()
+          : typeof record.status === 'string' && record.status.trim()
+            ? record.status.trim()
+            : null
+  return {
+    value: id,
+    label: primaryLabel,
+    description: secondary ? `${secondary} · ${kind}` : kind,
+  }
+}
+
+async function searchLeadTargets(kind: TargetKind, query: string): Promise<ComboboxOption[]> {
+  const resource = kind === 'person' ? 'people' : kind === 'company' ? 'companies' : 'deals'
+  const params = new URLSearchParams({ pageSize: '10', sortField: kind === 'deal' ? 'title' : 'name', sortDir: 'asc' })
+  if (query.trim()) params.set('search', query.trim())
+  const payload = await readApiResultOrThrow<ListResponse<Record<string, unknown>>>(`/api/customers/${resource}?${params.toString()}`)
+  return (payload.items ?? [])
+    .map((item) => targetOptionFromRecord(item, kind))
+    .filter((item): item is ComboboxOption => item !== null)
 }
 
 function makeFields(
@@ -748,9 +789,9 @@ export function LeadDetailClient({ id }: { id: string }) {
         if (next) {
           setSelectedStageId(next.stageId)
           setOwnerUserId(next.ownerUserId ?? '')
-          setLinkPersonId(next.linkedPersonId ?? '')
-          setLinkCompanyId(next.linkedCompanyId ?? '')
-          setLinkDealId(next.linkedDealId ?? '')
+          setLinkPersonId('')
+          setLinkCompanyId('')
+          setLinkDealId('')
           setConvertCreatePerson(false)
           setConvertCreateCompany(false)
           setConvertCreateDeal(false)
@@ -816,7 +857,7 @@ export function LeadDetailClient({ id }: { id: string }) {
     setReloadToken((value) => value + 1)
   }
 
-  async function linkTarget(kind: 'person' | 'company' | 'deal') {
+  async function linkTarget(kind: TargetKind) {
     if (!lead) return
     const value = kind === 'person' ? linkPersonId.trim() : kind === 'company' ? linkCompanyId.trim() : linkDealId.trim()
     if (!value) {
@@ -828,16 +869,6 @@ export function LeadDetailClient({ id }: { id: string }) {
       { leadId: lead.id, [`${kind}Id`]: value },
       t('customers.leads.detail.linked', 'Target linked.'),
       t('customers.leads.detail.linkError', 'Failed to link target.'),
-    )
-  }
-
-  async function createTarget(kind: 'person' | 'company' | 'deal') {
-    if (!lead) return
-    await runLeadAction(
-      `/api/customers/leads/create-${kind}`,
-      { leadId: lead.id },
-      t('customers.leads.detail.targetCreated', 'Target created and linked.'),
-      t('customers.leads.detail.targetCreateError', 'Failed to create target from lead.'),
     )
   }
 
@@ -945,11 +976,17 @@ export function LeadDetailClient({ id }: { id: string }) {
               <div className="font-medium">{t('customers.leads.detail.personTarget', 'Person')}</div>
               {lead.linkedPersonId ? <Badge variant="secondary">{t('customers.leads.detail.linkedBadge', 'Linked')}</Badge> : null}
             </div>
-            {lead.linkedPersonId ? <Link className="text-sm underline" href={`/backend/customers/people/${lead.linkedPersonId}`}>{lead.linkedPersonId}</Link> : null}
-            <Input value={linkPersonId} onChange={(event) => setLinkPersonId(event.target.value)} placeholder="person entity id" />
+            {lead.linkedPersonId ? <Link className="text-sm underline" href={`/backend/customers/people/${lead.linkedPersonId}`}>{t('customers.leads.detail.openLinkedPerson', 'Open linked person')}</Link> : null}
+            <ComboboxInput
+              value={linkPersonId}
+              onChange={setLinkPersonId}
+              placeholder={t('customers.leads.detail.searchPerson', 'Search person by name, email, or phone...')}
+              loadSuggestions={(query) => searchLeadTargets('person', query ?? '')}
+              allowCustomValues={false}
+            />
             <div className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={() => void linkTarget('person')}>{t('customers.leads.detail.link', 'Link')}</Button>
-              <Button size="sm" onClick={() => void createTarget('person')}>{t('customers.leads.detail.create', 'Create')}</Button>
+              <Button size="sm" variant="outline" onClick={() => void linkTarget('person')}>{t('customers.leads.detail.linkSelected', 'Link selected')}</Button>
+              <Button size="sm" asChild><Link href={`/backend/customers/people/create?leadId=${encodeURIComponent(lead.id)}`}>{t('customers.leads.detail.createInOm', 'Create in OM')}</Link></Button>
             </div>
           </div>
           <div className="space-y-3 rounded-md border p-3">
@@ -957,11 +994,17 @@ export function LeadDetailClient({ id }: { id: string }) {
               <div className="font-medium">{t('customers.leads.detail.companyTarget', 'Company')}</div>
               {lead.linkedCompanyId ? <Badge variant="secondary">{t('customers.leads.detail.linkedBadge', 'Linked')}</Badge> : null}
             </div>
-            {lead.linkedCompanyId ? <Link className="text-sm underline" href={`/backend/customers/companies/${lead.linkedCompanyId}`}>{lead.linkedCompanyId}</Link> : null}
-            <Input value={linkCompanyId} onChange={(event) => setLinkCompanyId(event.target.value)} placeholder="company entity id" />
+            {lead.linkedCompanyId ? <Link className="text-sm underline" href={`/backend/customers/companies/${lead.linkedCompanyId}`}>{t('customers.leads.detail.openLinkedCompany', 'Open linked company')}</Link> : null}
+            <ComboboxInput
+              value={linkCompanyId}
+              onChange={setLinkCompanyId}
+              placeholder={t('customers.leads.detail.searchCompany', 'Search company by name, email, or phone...')}
+              loadSuggestions={(query) => searchLeadTargets('company', query ?? '')}
+              allowCustomValues={false}
+            />
             <div className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={() => void linkTarget('company')}>{t('customers.leads.detail.link', 'Link')}</Button>
-              <Button size="sm" onClick={() => void createTarget('company')}>{t('customers.leads.detail.create', 'Create')}</Button>
+              <Button size="sm" variant="outline" onClick={() => void linkTarget('company')}>{t('customers.leads.detail.linkSelected', 'Link selected')}</Button>
+              <Button size="sm" asChild><Link href={`/backend/customers/companies/create?leadId=${encodeURIComponent(lead.id)}`}>{t('customers.leads.detail.createInOm', 'Create in OM')}</Link></Button>
             </div>
           </div>
           <div className="space-y-3 rounded-md border p-3">
@@ -969,11 +1012,17 @@ export function LeadDetailClient({ id }: { id: string }) {
               <div className="font-medium">{t('customers.leads.detail.dealTarget', 'Deal')}</div>
               {lead.linkedDealId ? <Badge variant="secondary">{t('customers.leads.detail.linkedBadge', 'Linked')}</Badge> : null}
             </div>
-            {lead.linkedDealId ? <Link className="text-sm underline" href={`/backend/customers/deals/${lead.linkedDealId}`}>{lead.linkedDealId}</Link> : null}
-            <Input value={linkDealId} onChange={(event) => setLinkDealId(event.target.value)} placeholder="deal id" />
+            {lead.linkedDealId ? <Link className="text-sm underline" href={`/backend/customers/deals/${lead.linkedDealId}`}>{t('customers.leads.detail.openLinkedDeal', 'Open linked deal')}</Link> : null}
+            <ComboboxInput
+              value={linkDealId}
+              onChange={setLinkDealId}
+              placeholder={t('customers.leads.detail.searchDeal', 'Search deal by title or status...')}
+              loadSuggestions={(query) => searchLeadTargets('deal', query ?? '')}
+              allowCustomValues={false}
+            />
             <div className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={() => void linkTarget('deal')}>{t('customers.leads.detail.link', 'Link')}</Button>
-              <Button size="sm" onClick={() => void createTarget('deal')}>{t('customers.leads.detail.create', 'Create')}</Button>
+              <Button size="sm" variant="outline" onClick={() => void linkTarget('deal')}>{t('customers.leads.detail.linkSelected', 'Link selected')}</Button>
+              <Button size="sm" asChild><Link href={`/backend/customers/deals/create?leadId=${encodeURIComponent(lead.id)}`}>{t('customers.leads.detail.createInOm', 'Create in OM')}</Link></Button>
             </div>
           </div>
         </div>
