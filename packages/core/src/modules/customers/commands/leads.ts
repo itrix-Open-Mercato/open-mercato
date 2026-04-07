@@ -2,6 +2,7 @@ import { registerCommand } from '@open-mercato/shared/lib/commands'
 import type { CommandHandler } from '@open-mercato/shared/lib/commands'
 import type { EntityManager } from '@mikro-orm/postgresql'
 import { CrudHttpError } from '@open-mercato/shared/lib/crud/errors'
+import { randomUUID } from 'crypto'
 import {
   CustomerLead,
   CustomerLeadHistory,
@@ -178,6 +179,7 @@ const createLeadCommand: CommandHandler<CustomerLeadCreateInput, { leadId: strin
     await assertLostReasonInScope(em, scope, parsed.lostReasonId, pipelineId)
 
     const lead = em.create(CustomerLead, {
+      id: randomUUID(),
       tenantId: parsed.tenantId,
       organizationId: parsed.organizationId,
       pipelineId,
