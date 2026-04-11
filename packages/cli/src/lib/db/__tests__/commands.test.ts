@@ -2,8 +2,10 @@ import {
   sanitizeModuleId,
   validateTableName,
   makeConstraintDropsIdempotent,
+  filterModulesForDbCommand,
   dbGreenfield,
 } from '../commands'
+import type { ModuleEntry } from '../../resolver'
 
 describe('db commands security', () => {
   describe('sanitizeModuleId', () => {
@@ -132,6 +134,26 @@ describe('makeConstraintDropsIdempotent', () => {
 })
 
 describe('db commands', () => {
+  describe('filterModulesForDbCommand', () => {
+    const modules: ModuleEntry[] = [
+      { id: 'auth' },
+      { id: 'customers' },
+      { id: 'customs_documents' },
+    ]
+
+    it('returns all modules when no filter is provided', () => {
+      expect(filterModulesForDbCommand(modules)).toEqual(modules)
+    })
+
+    it('filters modules by requested ids', () => {
+      expect(filterModulesForDbCommand(modules, ['customs_documents'])).toEqual([{ id: 'customs_documents' }])
+    })
+
+    it('throws when a requested module is not enabled', () => {
+      expect(() => filterModulesForDbCommand(modules, ['missing'])).toThrow(/Unknown module id/)
+    })
+  })
+
   describe('dbGreenfield', () => {
     it('should require --yes flag', async () => {
       // Mock console.error and process.exit

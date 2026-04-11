@@ -201,14 +201,27 @@ function getMigrationsPath(entry: ModuleEntry, resolver: PackageResolver): strin
 
 export interface DbOptions {
   quiet?: boolean
+  moduleIds?: string[]
 }
 
 export interface GreenfieldOptions extends DbOptions {
   yes: boolean
 }
 
+export function filterModulesForDbCommand(modules: ModuleEntry[], moduleIds?: string[]): ModuleEntry[] {
+  const requested = new Set((moduleIds ?? []).map((id) => id.trim()).filter(Boolean))
+  if (!requested.size) return modules
+  const filtered = modules.filter((entry) => requested.has(entry.id))
+  const found = new Set(filtered.map((entry) => entry.id))
+  const missing = [...requested].filter((id) => !found.has(id))
+  if (missing.length) {
+    throw new Error(`Unknown module id${missing.length === 1 ? '' : 's'} for db command: ${missing.join(', ')}`)
+  }
+  return filtered
+}
+
 export async function dbGenerate(resolver: PackageResolver, options: DbOptions = {}): Promise<void> {
-  const modules = resolver.loadEnabledModules()
+  const modules = filterModulesForDbCommand(resolver.loadEnabledModules(), options.moduleIds)
   const ordered = sortModules(modules)
   const results: string[] = []
 
@@ -299,7 +312,7 @@ export async function dbGenerate(resolver: PackageResolver, options: DbOptions =
 }
 
 export async function dbMigrate(resolver: PackageResolver, options: DbOptions = {}): Promise<void> {
-  const modules = resolver.loadEnabledModules()
+  const modules = filterModulesForDbCommand(resolver.loadEnabledModules(), options.moduleIds)
   const ordered = sortModules(modules)
   const results: string[] = []
 

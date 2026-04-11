@@ -77,7 +77,10 @@ function getDatabaseTargetLabel(): string {
 }
 
 function formatCliFailureMessage(modName: string, cmdName: string, error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
+  const rawMessage = error instanceof Error ? error.message : String(error)
+  const message = rawMessage.trim()
+    || (error instanceof Error && error.stack ? error.stack : '')
+    || 'Unknown error'
   const nestedErrors = collectNestedErrors(error)
 
   const isDatabaseCommand = modName === 'db' && ['migrate', 'generate', 'greenfield'].includes(cmdName)
@@ -1090,25 +1093,55 @@ export async function run(argv = process.argv) {
   } as any)
 
   // Built-in CLI module: db
+  function parseDbModuleFilter(args: string[]): string[] | undefined {
+    const moduleIds: string[] = []
+    for (let index = 0; index < args.length; index += 1) {
+      const arg = args[index]
+      if (arg === '--module' || arg === '-m') {
+        const value = args[index + 1]
+        if (!value) throw new Error(`${arg} requires a module id`)
+        moduleIds.push(value)
+        index += 1
+        continue
+      }
+      if (arg.startsWith('--module=')) {
+        moduleIds.push(arg.slice('--module='.length))
+        continue
+      }
+      if (arg === '--modules') {
+        const value = args[index + 1]
+        if (!value) throw new Error('--modules requires a comma-separated module id list')
+        moduleIds.push(...value.split(','))
+        index += 1
+        continue
+      }
+      if (arg.startsWith('--modules=')) {
+        moduleIds.push(...arg.slice('--modules='.length).split(','))
+      }
+    }
+    const normalized = moduleIds.map((id) => id.trim()).filter(Boolean)
+    return normalized.length ? normalized : undefined
+  }
+
   all.push({
     id: 'db',
     cli: [
       {
         command: 'generate',
-        run: async () => {
+        run: async (args: string[]) => {
           const { createResolver } = await import('./lib/resolver')
           const { dbGenerate } = await import('./lib/db')
           const resolver = createResolver()
-          await dbGenerate(resolver)
+          await dbGenerate(resolver, { moduleIds: parseDbModuleFilter(args) })
         },
       },
       {
         command: 'migrate',
-        run: async () => {
+        run: async (args: string[]) => {
           const { createResolver } = await import('./lib/resolver')
           const { dbMigrate } = await import('./lib/db')
           const resolver = createResolver()
-          await dbMigrate(resolver)
+          await dbMigrate(resolver, { moduleIds: parseDbModuleFilter(args) })
         },
       },
       {

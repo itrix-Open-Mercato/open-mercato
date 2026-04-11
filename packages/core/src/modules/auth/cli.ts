@@ -5,7 +5,7 @@ import type { EntityManager } from '@mikro-orm/postgresql'
 import { User, Role, UserRole } from '@open-mercato/core/modules/auth/data/entities'
 import { Tenant, Organization } from '@open-mercato/core/modules/directory/data/entities'
 import { rebuildHierarchyForTenant } from '@open-mercato/core/modules/directory/lib/hierarchy'
-import { ensureRoles, setupInitialTenant } from './lib/setup-app'
+import { ensureDefaultRoleAcls, ensureRoles, setupInitialTenant } from './lib/setup-app'
 import { normalizeTenantId } from './lib/tenantAccess'
 import { computeEmailHash } from './lib/emailHash'
 import { findWithDecryption, findOneWithDecryption } from '@open-mercato/shared/lib/encryption/find'
@@ -198,6 +198,43 @@ const seedRoles: ModuleCli = {
       if (!id) continue
       await ensureRoles(em, { tenantId: id })
       console.log('🛡️ Roles ensured for tenant', id)
+    }
+  },
+}
+
+const seedAcls: ModuleCli = {
+  command: 'seed-acls',
+  async run(rest) {
+    const args = parseArgs(rest)
+    const tenantId = (args.tenantId as string) ?? (args.tenant as string) ?? (args.tenant_id as string) ?? null
+    const container = await createRequestContainer()
+    const em = container.resolve<EntityManager>('em')
+    const modules = getCliModules()
+
+    try {
+      if (tenantId) {
+        await ensureDefaultRoleAcls(em, tenantId, modules)
+        console.log('🛡️ Role ACLs ensured for tenant', tenantId)
+        return
+      }
+
+      const tenants = await em.find(Tenant, {})
+      if (!tenants.length) {
+        console.log('No tenants found; nothing to seed.')
+        return
+      }
+
+      for (const tenant of tenants) {
+        const id = tenant.id ? String(tenant.id) : null
+        if (!id) continue
+        await ensureDefaultRoleAcls(em, id, modules)
+        console.log('🛡️ Role ACLs ensured for tenant', id)
+      }
+    } finally {
+      const disposable = container as unknown as { dispose?: () => Promise<void> }
+      if (typeof disposable.dispose === 'function') {
+        await disposable.dispose()
+      }
     }
   },
 }
@@ -643,4 +680,4 @@ const setPassword: ModuleCli = {
 }
 
 // Export the full CLI list
-export default [addUser, seedRoles, rotateEncryptionKey, addOrganization, setupApp, listOrganizations, listTenants, listUsers, setPassword]
+export default [addUser, seedRoles, seedAcls, rotateEncryptionKey, addOrganization, setupApp, listOrganizations, listTenants, listUsers, setPassword]
