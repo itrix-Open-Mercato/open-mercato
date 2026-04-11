@@ -7,8 +7,6 @@
  * Promise prototype chain (NEW-01, CVSS 9.9).
  */
 
-import ivm from 'isolated-vm'
-
 export interface SandboxOptions {
   /** Execution timeout in milliseconds (default: 30_000) */
   timeout?: number
@@ -30,6 +28,63 @@ const MEMORY_LIMIT_MB = parseInt(process.env.SANDBOX_MEMORY_MB ?? '32', 10)
 const MAX_LOG_ENTRIES = 100
 const MAX_LOG_ENTRY_LENGTH = 1000
 
+type IsolateContext = {
+  global: {
+    set(key: string, value: unknown): Promise<void>
+  }
+  evalClosure(code: string, args: unknown[]): Promise<unknown>
+}
+
+type IsolateScript = {
+  run(ctx: IsolateContext, options: { promise: true; copy: true }): Promise<unknown>
+}
+
+type IsolateInstance = {
+  createContext(): Promise<IsolateContext>
+  compileScript(code: string): Promise<IsolateScript>
+  dispose(): void
+}
+
+type IsolatedVm = {
+  Isolate: new (options: { memoryLimit: number }) => IsolateInstance
+  Callback: new (callback: (...args: unknown[]) => unknown, options?: { ignored?: boolean }) => unknown
+  ExternalCopy: new (value: unknown) => { copyInto(): unknown }
+}
+
+let isolatedVmPromise: Promise<IsolatedVm> | null = null
+const ISOLATED_VM_PACKAGE = 'isolated' + '-vm'
+
+function hasIsolatedVmShape(value: unknown): value is IsolatedVm {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return typeof candidate.Isolate === 'function'
+    && typeof candidate.Callback === 'function'
+    && typeof candidate.ExternalCopy === 'function'
+}
+
+function readDefaultExport(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || !('default' in value)) return value
+  return (value as { default: unknown }).default
+}
+
+async function loadIsolatedVm(): Promise<IsolatedVm> {
+  const runtimeImport = Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<unknown>
+  isolatedVmPromise ??= runtimeImport(ISOLATED_VM_PACKAGE)
+    .then((module) => {
+      const candidate = readDefaultExport(module)
+      if (!hasIsolatedVmShape(candidate)) {
+        throw new Error('isolated-vm did not expose the expected sandbox API.')
+      }
+      return candidate
+    })
+    .catch((error: unknown) => {
+      isolatedVmPromise = null
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`AI Code Mode sandbox is unavailable because isolated-vm could not be loaded: ${message}`)
+    })
+  return isolatedVmPromise
+}
+
 /**
  * Create a sandboxed execution environment.
  *
@@ -44,16 +99,18 @@ export function createSandbox(globals: Record<string, unknown>, options: Sandbox
       const logs: string[] = []
       const start = Date.now()
 
-      const isolate = new ivm.Isolate({ memoryLimit: MEMORY_LIMIT_MB })
+      let isolate: IsolateInstance | null = null
 
       try {
+        const ivm = await loadIsolatedVm()
+        isolate = new ivm.Isolate({ memoryLimit: MEMORY_LIMIT_MB })
         const ctx = await isolate.createContext()
 
         // Console proxy — fire-and-forget so logging never blocks the isolate
-        await bootstrapConsole(ctx, logs)
+        await bootstrapConsole(ivm, ctx, logs)
 
         // Inject caller-provided globals (spec, api, context, etc.)
-        await injectGlobals(ctx, globals)
+        await injectGlobals(ivm, ctx, globals)
 
         // Shadow globalThis so user code cannot navigate to the isolate's global
         // object and inspect/escape via its properties
@@ -92,7 +149,7 @@ export function createSandbox(globals: Record<string, unknown>, options: Sandbox
         }
       } finally {
         // Always release the V8 isolate to avoid memory leaks
-        isolate.dispose()
+        isolate?.dispose()
       }
     },
   }
@@ -130,7 +187,7 @@ export function normalizeCode(code: string): string {
  * Uses ivm.Callback with { ignored: true } (fire-and-forget) so logging never
  * blocks the isolate event loop. Arguments are deep-copied automatically.
  */
-async function bootstrapConsole(ctx: ivm.Context, logs: string[]): Promise<void> {
+async function bootstrapConsole(ivm: IsolatedVm, ctx: IsolateContext, logs: string[]): Promise<void> {
   const cb = new ivm.Callback((...args: unknown[]) => pushLog(logs, args), { ignored: true })
 
   await ctx.evalClosure(
@@ -158,7 +215,8 @@ async function bootstrapConsole(ctx: ivm.Context, logs: string[]): Promise<void>
  *                                  function properties via SAB bridge wrappers
  */
 async function injectGlobals(
-  ctx: ivm.Context,
+  ivm: IsolatedVm,
+  ctx: IsolateContext,
   globals: Record<string, unknown>
 ): Promise<void> {
   const jail = ctx.global
@@ -170,7 +228,7 @@ async function injectGlobals(
     }
 
     if (typeof value === 'function') {
-      await injectFn(ctx, value as (...a: unknown[]) => unknown, `globalThis[${JSON.stringify(key)}]`)
+      await injectFn(ivm, ctx, value as (...a: unknown[]) => unknown, `globalThis[${JSON.stringify(key)}]`)
       continue
     }
 
@@ -192,7 +250,7 @@ async function injectGlobals(
 
       // Add function-property SAB bridges one by one
       for (const [prop, fn] of fnProps) {
-        await injectFn(ctx, fn, `globalThis[${JSON.stringify(key)}][${JSON.stringify(prop)}]`)
+        await injectFn(ivm, ctx, fn, `globalThis[${JSON.stringify(key)}][${JSON.stringify(prop)}]`)
       }
       continue
     }
@@ -216,7 +274,8 @@ async function injectGlobals(
  *      isolate's worker thread), then calls getResultCb and returns or throws.
  */
 async function injectFn(
-  ctx: ivm.Context,
+  ivm: IsolatedVm,
+  ctx: IsolateContext,
   fn: (...a: unknown[]) => unknown,
   target: string
 ): Promise<void> {
