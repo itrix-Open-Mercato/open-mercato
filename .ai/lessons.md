@@ -218,6 +218,16 @@ Centralize shared command utilities like undo extraction in `packages/shared/src
 
 **Problem**: Later migration `Migration20260226155449` repeated schema creation already handled by `Migration20260218191730`.
 
+## Build package dist after adding new module files used by the app runtime
+
+**Context**: A new `packages/core/src/modules/customs_documents/lib/attachmentContent.ts` file passed `tsc --noEmit`, but the Next app imported `packages/core/dist/...` during dev.
+
+**Problem**: The app kept resolving stale dist output and `/api/auth/login` returned 500 with `Module not found: Can't resolve '../lib/attachmentContent.js'`, causing E2E auth setup to fail even though TypeScript passed.
+
+**Rule**: After adding new source files in package modules consumed by the app runtime, run the package build before browser/API E2E (`yarn workspace @open-mercato/core build`, or the affected package equivalent). Treat `tsc --noEmit` as a type check only, not a runtime dist check.
+
+**Applies to**: `packages/core`, `packages/ai-assistant`, `packages/cli`, and any package where `apps/mercato` imports generated `dist` files in dev.
+
 **Rule**: Before adding a migration, check existing module migrations for overlapping DDL. If a duplicate migration was already committed and may be in history, keep the file/class name stable and convert duplicate migration content to a no-op instead of deleting/renaming it.
 
 **Applies to**: `packages/core/src/modules/*/migrations/*.ts` and initialize/ephemeral test bootstrap flows.
