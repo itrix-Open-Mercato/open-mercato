@@ -41,8 +41,21 @@ describe('extractAttachmentContent', () => {
     mockExecFile.mockImplementation((_bin, _args, cb) => cb(new Error('boom')))
     const { extractAttachmentContent } = await import('../textExtraction')
     const result = await extractAttachmentContent({ filePath, mimeType: 'application/pdf' })
-    expect(mockExecFile).toHaveBeenCalled()
+    expect(mockExecFile).toHaveBeenCalledTimes(2)
     expect(result).toBeNull()
+  })
+
+  it('falls back to pdftotext for PDFs when markitdown is unavailable', async () => {
+    const filePath = await writeTempFile('doc.pdf', 'pdf')
+    mockExecFile.mockImplementation((bin, _args, cb) => {
+      if (bin === 'markitdown') return cb(new Error('not found'))
+      return cb(null, 'native pdf text')
+    })
+    const { extractAttachmentContent } = await import('../textExtraction')
+    const result = await extractAttachmentContent({ filePath, mimeType: 'application/pdf' })
+    expect(mockExecFile).toHaveBeenNthCalledWith(1, 'markitdown', [filePath], expect.any(Function))
+    expect(mockExecFile).toHaveBeenNthCalledWith(2, 'pdftotext', [filePath, '-'], expect.any(Function))
+    expect(result).toBe('native pdf text')
   })
 
   it('allows markitdown for supported office/pdf/outlook types', async () => {

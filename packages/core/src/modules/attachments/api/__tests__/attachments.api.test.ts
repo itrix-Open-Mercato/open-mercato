@@ -137,6 +137,19 @@ describe('attachments API', () => {
     expect(payload?.content).toBe('extracted text')
   })
 
+  it('extracts PDF text before falling back to LLM OCR', async () => {
+    mockExtractAttachmentContent.mockResolvedValue('pdf text layer')
+    const file = new File([new Uint8Array([1, 2, 3])], 'doc.pdf', { type: 'application/pdf' })
+    const req = new Request('http://x/api/attachments', { method: 'POST', body: fdWith(file) as any })
+    const res = await upload(req)
+    expect(res.status).toBe(200)
+    expect(mockExtractAttachmentContent).toHaveBeenCalledWith(expect.objectContaining({
+      mimeType: 'application/pdf',
+    }))
+    const payload = mockEm.create.mock.calls.find((call) => call[0].name === 'Attachment')?.[1]
+    expect(payload?.content).toBe('pdf text layer')
+  })
+
   it('skips OCR when partition disables it', async () => {
     const disabledPartition = { ...partitions[0], requiresOcr: false }
     mockEm.findOne.mockImplementation(async (entity: any, where: any) => {

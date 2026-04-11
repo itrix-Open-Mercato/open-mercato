@@ -58,6 +58,19 @@ export async function extractAttachmentContent(params: ExtractParams): Promise<s
     return text
   } catch (error) {
     console.error('[attachments] failed to extract content via markitdown', error)
+  }
+  if (path.extname(filePath).toLowerCase() !== '.pdf' && (mimeType || '').toLowerCase() !== 'application/pdf') {
+    return null
+  }
+  try {
+    const result = await execFileAsync('pdftotext', [filePath, '-'])
+    const stdout = typeof result === 'string' || Buffer.isBuffer(result) ? result : result?.stdout
+    const text = typeof stdout === 'string' ? stdout : stdout?.toString() ?? ''
+    const trimmed = text.trim()
+    if (!trimmed) return null
+    return text
+  } catch (error) {
+    console.error('[attachments] failed to extract content via pdftotext', error)
     return null
   }
 }

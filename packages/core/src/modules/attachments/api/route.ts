@@ -306,7 +306,7 @@ export async function POST(req: Request) {
   const fileMimeType = (file as any).type || 'application/octet-stream'
   const useLlmOcr = requiresOcr && shouldUseLlmOcr(fileMimeType, safeName)
 
-  if (requiresOcr && !useLlmOcr) {
+  if (requiresOcr) {
     try {
       extractedContent = await extractAttachmentContent({
         filePath: stored.absolutePath,
@@ -341,7 +341,7 @@ export async function POST(req: Request) {
   })
   await em.persistAndFlush(att)
 
-  if (useLlmOcr) {
+  if (useLlmOcr && !extractedContent) {
     const ocrService = new OcrService()
     if (ocrService.available) {
       requestOcrProcessing(em, att, stored.absolutePath).catch((error) => {
